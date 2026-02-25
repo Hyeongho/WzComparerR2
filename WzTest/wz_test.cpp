@@ -355,8 +355,7 @@ WzHeader readHeader(WzReader& reader, const std::string& filePath) {
 // ================================================================
 WzNode readDirTree(WzReader& reader,
                    const WzHeader& header,
-                   const std::vector<uint8_t>& cryptoKey,
-                   int depth, int maxDepth) {
+                   const std::vector<uint8_t>& cryptoKey) {
     WzNode root;
     int count = reader.readCompressedInt32();
 
@@ -369,11 +368,11 @@ WzNode readDirTree(WzReader& reader,
         switch (nodeType) {
             case 0x02: {
                 // 별도 오프셋에 있는 문자열 참조
+                // C# 는 PartialStream(DataStartPosition 기준)을 사용하므로
+                // strOff 는 DataStartPosition 기준 상대 오프셋 → 절대 오프셋으로 변환
                 int32_t strOff = reader.readS32();
-                // strOff는 이미 절대 파일 오프셋 (dataStartPosition을 더하면 안 됨)
-                // C# ReadStringAt(reader.ReadInt32() + stringOffAdd) 와 동일
                 int32_t adjust = header.encverMissing ? 2 : -1;
-                int64_t absOff = (int64_t)strOff + adjust;
+                int64_t absOff = (int64_t)header.dataStartPosition + strOff + adjust;
                 name = reader.readStringAt(absOff, cryptoKey);
                 break;
             }
@@ -405,16 +404,15 @@ WzNode readDirTree(WzReader& reader,
     }
 
     // 하위 디렉토리 재귀 읽기 (reader 위치를 순서대로 소비)
-    if (depth < maxDepth) {
-        for (auto& dirName : dirNames) {
-            WzNode subTree = readDirTree(reader, header, cryptoKey, depth + 1, maxDepth);
-            subTree.name = dirName;
-            // root.children 에서 해당 디렉토리 노드 교체
-            for (auto& child : root.children) {
-                if (child.name == dirName && child.type == WzNodeType::Directory) {
-                    child.children = std::move(subTree.children);
-                    break;
-                }
+    // depth 제한 없이 항상 재귀 — depth 제한을 걸면 소비되지 않은 데이터 블록이
+    // 남아 reader 위치가 틀어져 이후 형제 디렉토리 읽기가 깨진다 (C# 도 동일)
+    for (auto& dirName : dirNames) {
+        WzNode subTree = readDirTree(reader, header, cryptoKey);
+        subTree.name = dirName;
+        for (auto& child : root.children) {
+            if (child.name == dirName && child.type == WzNodeType::Directory) {
+                child.children = std::move(subTree.children);
+                break;
             }
         }
     }
@@ -507,7 +505,7 @@ int main(int argc, char* argv[]) {
 
         // ── 노드 트리 읽기 ──
         reader.seek(header.dataStartPosition);
-        WzNode root = readDirTree(reader, header, cryptoKey, 0, maxDepth);
+        WzNode root = readDirTree(reader, header, cryptoKey);
         root.name = std::filesystem::path(wzPath).filename().string();
         root.type = WzNodeType::Directory;
 
