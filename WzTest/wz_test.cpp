@@ -370,10 +370,10 @@ WzNode readDirTree(WzReader& reader,
             case 0x02: {
                 // 별도 오프셋에 있는 문자열 참조
                 int32_t strOff = reader.readS32();
-                // stringOffAdd: encverMissing → +2, 아니면 → -1
-                // DataStartPosition 기준 절대 파일 오프셋
+                // strOff는 이미 절대 파일 오프셋 (dataStartPosition을 더하면 안 됨)
+                // C# ReadStringAt(reader.ReadInt32() + stringOffAdd) 와 동일
                 int32_t adjust = header.encverMissing ? 2 : -1;
-                int64_t absOff = (int64_t)header.dataStartPosition + strOff + adjust;
+                int64_t absOff = (int64_t)strOff + adjust;
                 name = reader.readStringAt(absOff, cryptoKey);
                 break;
             }
