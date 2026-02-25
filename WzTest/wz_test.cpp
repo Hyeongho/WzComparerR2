@@ -8,12 +8,8 @@
  *   Linux:   g++ -std=c++17 wz_test.cpp -lssl -lcrypto -o wz_test
  *   Windows: cl /std:c++17 wz_test.cpp /link libssl.lib libcrypto.lib
  *
- * 사용법:
- *   ./wz_test <경로/파일명.wz> [최대출력깊이(기본3)]
- *
- * 예시:
- *   ./wz_test /path/to/Base.wz
- *   ./wz_test /path/to/Character.wz 2
+ * 테스트 경로 (고정):
+ *   C:\Nexon\Maple\Data\Base\Base.wz
  */
 
 #include <iostream>
@@ -457,13 +453,8 @@ void printTree(const WzNode& node, int depth, int maxDepth,
 // main
 // ================================================================
 int main(int argc, char* argv[]) {
-    if (argc < 2) {
-        std::cerr << "사용법: " << argv[0] << " <파일.wz> [최대깊이=3]\n";
-        return 1;
-    }
-
-    std::string wzPath = argv[1];
-    int maxDepth = (argc >= 3) ? std::stoi(argv[2]) : 3;
+    std::string wzPath = "C:\\Nexon\\Maple\\Data\\Base\\Base.wz";
+    int maxDepth = 3;
 
     // ── 파일 열기 ──
     std::ifstream file(wzPath, std::ios::binary);
