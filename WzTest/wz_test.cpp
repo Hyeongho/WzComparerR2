@@ -15,6 +15,7 @@
 #include <iostream>
 #include <fstream>
 #include <sstream>
+#include <iomanip>
 #include <string>
 #include <vector>
 #include <cstdint>
@@ -508,6 +509,67 @@ int main(int argc, char* argv[]) {
         WzNode root = readDirTree(reader, header, cryptoKey);
         root.name = std::filesystem::path(wzPath).filename().string();
         root.type = WzNodeType::Directory;
+
+        // ── KMST1125 분할 WZ 파일 처리 ──
+        // Base.wz 와 같은 폴더에 Base.ini 가 있으면 KMST1125 포맷:
+        //   Base.wz       → DIR 구조만 (IMG 없음)
+        //   Base_000.wz   → IMG 파일들
+        //   Base_001.wz   → ...
+        // ini 형식: 각 줄이 "key|value", LastWzIndex|N 으로 마지막 인덱스 기록
+        {
+            namespace fs = std::filesystem;
+            fs::path wzFs(wzPath);
+            fs::path wzDir  = wzFs.parent_path();
+            std::string stem = wzFs.stem().string(); // "Base"
+            fs::path iniPath = wzDir / (stem + ".ini");
+
+            if (fs::exists(iniPath)) {
+                // ini에서 LastWzIndex 읽기
+                int lastIdx = -1;
+                std::ifstream ini(iniPath.string());
+                std::string line;
+                while (std::getline(ini, line)) {
+                    if (line.rfind("LastWzIndex|", 0) == 0) {
+                        try { lastIdx = std::stoi(line.substr(12)); } catch (...) {}
+                        break;
+                    }
+                }
+                // ini에 없으면 파일 스캔으로 확인
+                if (lastIdx < 0) {
+                    for (int i = 0; ; i++) {
+                        char buf[8]; std::snprintf(buf, sizeof(buf), "_%03d", i);
+                        if (!fs::exists(wzDir / (stem + buf + ".wz"))) break;
+                        lastIdx = i;
+                    }
+                }
+
+                if (lastIdx >= 0) {
+                    std::cout << "[KMST1125] 분할 WZ 감지: "
+                              << stem << "_000.wz ~ "
+                              << stem << "_" << std::setfill('0') << std::setw(3) << lastIdx
+                              << ".wz\n\n";
+                    for (int i = 0; i <= lastIdx; i++) {
+                        char buf[8]; std::snprintf(buf, sizeof(buf), "_%03d", i);
+                        fs::path extraPath = wzDir / (stem + buf + ".wz");
+                        std::ifstream ef(extraPath.string(), std::ios::binary);
+                        if (!ef.is_open()) {
+                            std::cerr << "  [경고] 열기 실패: " << extraPath.filename() << "\n";
+                            continue;
+                        }
+                        WzReader er(ef);
+                        WzHeader eh = readHeader(er, extraPath.string());
+                        er.seek(eh.dataStartPosition);
+                        WzNode extra = readDirTree(er, eh, cryptoKey);
+                        // 자식 노드 전부 main root 에 merge
+                        for (auto& child : extra.children)
+                            root.children.push_back(std::move(child));
+                        std::cout << "  [병합] " << extraPath.filename().string()
+                                  << "  (" << extra.children.size() << " 노드)\n";
+                    }
+                    std::cout << "\n";
+                }
+            }
+        }
 
         // ── 출력 ──
         std::cout << "[노드 트리] (최대 깊이: " << maxDepth << ")\n";
