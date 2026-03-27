@@ -466,6 +466,12 @@ WzNode readDirTreePkg2(WzReader& reader, const std::vector<uint8_t>& cryptoKey,
             reader.seek(reader.tell() - std::streamoff(1));
             break;
         } else {
+            std::cout << "[PKG2 DBG] " << debugLabel
+                      << " encryptedEntryCount=" << encryptedEntryCount
+                      << " entries_so_far=" << entries.size()
+                      << " unknown_nodeType=0x" << std::hex << (int)nodeType << std::dec
+                      << " at_pos=" << reader.tell() << "\n";
+            std::cout.flush();
             throw std::runtime_error(
                 "알 수 없는 PKG2 노드 타입: 0x" +
                 (std::ostringstream() << std::hex << (int)nodeType).str()
