@@ -601,11 +601,61 @@ void printTree(const WzNode& node, int depth, int maxDepth,
 }
 
 // ================================================================
+// TeeStreambuf - std::cout 출력을 파일에도 동시 기록
+// ================================================================
+class TeeStreambuf : public std::streambuf {
+public:
+    TeeStreambuf(std::streambuf* console, std::streambuf* file)
+        : con(console), fil(file) {}
+protected:
+    int overflow(int c) override {
+        if (c == EOF) return !EOF;
+        if (con->sputc((char)c) == EOF) return EOF;
+        if (fil->sputc((char)c) == EOF) return EOF;
+        return c;
+    }
+    std::streamsize xsputn(const char* s, std::streamsize n) override {
+        con->sputn(s, n);
+        return fil->sputn(s, n);
+    }
+private:
+    std::streambuf* con;
+    std::streambuf* fil;
+};
+
+// ================================================================
 // main
 // ================================================================
 int main(int argc, char* argv[]) {
     std::string wzPath = "C:\\Nexon\\Maple\\Data\\Base\\Base.wz";
     int maxDepth = 3;
+    std::string outputPath;
+
+    // ── CLI 인수 파싱: -o <출력파일> ──
+    for (int i = 1; i < argc; i++) {
+        std::string arg = argv[i];
+        if ((arg == "-o" || arg == "--output") && i + 1 < argc) {
+            outputPath = argv[++i];
+        } else if (arg.rfind("-o", 0) == 0 && arg.size() > 2) {
+            outputPath = arg.substr(2); // -o<path> 형태
+        }
+    }
+
+    // ── 출력 파일 설정 (지정 시 cout 을 파일로도 tee) ──
+    std::ofstream outFile;
+    std::unique_ptr<TeeStreambuf> teeBuf;
+    std::streambuf* origCoutBuf = nullptr;
+
+    if (!outputPath.empty()) {
+        outFile.open(outputPath);
+        if (!outFile.is_open()) {
+            std::cerr << "출력 파일을 열 수 없습니다: " << outputPath << "\n";
+            return 1;
+        }
+        teeBuf = std::make_unique<TeeStreambuf>(std::cout.rdbuf(), outFile.rdbuf());
+        origCoutBuf = std::cout.rdbuf(teeBuf.get());
+        std::cerr << "출력 파일: " << outputPath << "\n";
+    }
 
     // ── 파일 열기 ──
     std::ifstream file(wzPath, std::ios::binary);
@@ -758,7 +808,13 @@ int main(int argc, char* argv[]) {
 
     } catch (const std::exception& ex) {
         std::cerr << "\n[오류] " << ex.what() << "\n";
+        if (origCoutBuf) std::cout.rdbuf(origCoutBuf);
         return 1;
+    }
+
+    if (origCoutBuf) {
+        std::cout.rdbuf(origCoutBuf);
+        std::cerr << "저장 완료: " << outputPath << "\n";
     }
 
     return 0;
