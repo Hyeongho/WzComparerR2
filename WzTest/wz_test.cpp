@@ -789,12 +789,17 @@ int main(int argc, char* argv[]) {
         }
 
         // ── 트리 문서 파일 준비 ──
-        // <wzname>_tree.txt 로 자동 저장 (콘솔에도 동시 출력)
-        std::string treePath =
-            std::filesystem::path(wzPath).stem().string() + "_tree.txt";
+        // WZ 파일과 같은 폴더에 <wzname>_tree.txt 로 저장
+        namespace fs = std::filesystem;
+        fs::path treePath = fs::path(wzPath).parent_path()
+                            / (fs::path(wzPath).stem().string() + "_tree.txt");
+        std::string treePathAbs = fs::absolute(treePath).string();
+
         std::ofstream treeFile(treePath);
         if (!treeFile.is_open())
-            std::cerr << "[경고] 트리 파일을 만들 수 없습니다: " << treePath << "\n";
+            std::cerr << "[경고] 트리 파일을 만들 수 없습니다: " << treePathAbs << "\n";
+        else
+            std::cerr << "트리 파일 생성: " << treePathAbs << "\n";
 
         TeeStreambuf treeTee(std::cout.rdbuf(),
                             treeFile.is_open() ? treeFile.rdbuf() : std::cout.rdbuf());
@@ -820,7 +825,7 @@ int main(int argc, char* argv[]) {
 
         if (treeFile.is_open()) {
             treeFile.close();
-            std::cerr << "트리 저장 완료: " << treePath << "\n";
+            std::cerr << "트리 저장 완료: " << treePathAbs << "\n";
         }
 
     } catch (const std::exception& ex) {
