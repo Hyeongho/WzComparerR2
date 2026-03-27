@@ -198,6 +198,10 @@ FakesAssemblies/
 # Visual Studio 6 workspace options file
 *.opt
 
+# C++ build output
+/wz_test
+/WzTest/build/
+
 # Ignore WcR2 temp directory
 OldVer/
 !References/x86/
