@@ -478,7 +478,7 @@ WzNode readDirTreePkg2(WzReader& reader, const std::vector<uint8_t>& cryptoKey,
 
     // ── 디버그 출력 ──
     if (!debugLabel.empty()) {
-        std::cerr << "[PKG2 DBG] " << debugLabel
+        std::cout << "[PKG2 DBG] " << debugLabel
                   << " | encryptedEntryCount=" << encryptedEntryCount
                   << " | entries=" << entries.size()
                   << " | encryptedOffsetCount=" << encryptedOffsetCount
@@ -489,7 +489,7 @@ WzNode readDirTreePkg2(WzReader& reader, const std::vector<uint8_t>& cryptoKey,
             if (e.nodeType == 0x04) imgCount++;
             else dirCount++;
         }
-        std::cerr << "         dirs=" << dirCount << " imgs=" << imgCount << "\n";
+        std::cout << "         dirs=" << dirCount << " imgs=" << imgCount << "\n";
     }
 
     std::vector<std::string> dirNames;
@@ -578,7 +578,7 @@ WzNode loadWzFolder(const std::string& folderPath, const std::vector<uint8_t>& c
             lastIdx = i;
         }
     }
-    std::cerr << "[loadWzFolder] " << name << " lastIdx=" << lastIdx << "\n";
+    std::cout << "[loadWzFolder] " << name << " lastIdx=" << lastIdx << "\n";
 
     // 3. 분할 파일 merge: Character_000.wz …
     for (int i = 0; i <= lastIdx; i++) {
