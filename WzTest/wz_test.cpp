@@ -556,7 +556,17 @@ WzNode loadWzFolder(const std::string& folderPath, const std::vector<uint8_t>& c
     std::string name = dir.filename().string();
 
     // 1. 엔트리 파일 로드
-    WzNode root = loadSingleWzTree((dir / (name + ".wz")).string(), cryptoKey);
+    std::cout << "[loadWzFolder] " << name << " 로드 시작\n";
+    WzNode root;
+    try {
+        root = loadSingleWzTree((dir / (name + ".wz")).string(), cryptoKey);
+        std::cout << "[loadWzFolder] " << name << " 로드 성공, 노드=" << root.children.size() << "\n";
+    } catch (const std::exception& e) {
+        std::cout << "[loadWzFolder] " << name << " 로드 실패: " << e.what() << "\n";
+        root.name = name;
+        root.type = WzNodeType::Directory;
+        root.childCount = 0;
+    }
 
     // 2. LastWzIndex 확인 (ini 우선, 없으면 파일 스캔)
     int lastIdx = -1;
@@ -579,6 +589,7 @@ WzNode loadWzFolder(const std::string& folderPath, const std::vector<uint8_t>& c
         }
     }
     std::cout << "[loadWzFolder] " << name << " lastIdx=" << lastIdx << "\n";
+    std::cout.flush();
 
     // 3. 분할 파일 merge: Character_000.wz …
     for (int i = 0; i <= lastIdx; i++) {
