@@ -435,7 +435,8 @@ WzNode readDirTree(WzReader& reader,
 //   OR (encryptedEntryCount 가 [-127,127] 범위이고
 //       nodeType == (uint8_t)(int8_t)encryptedEntryCount)
 // ================================================================
-WzNode readDirTreePkg2(WzReader& reader, const std::vector<uint8_t>& cryptoKey) {
+WzNode readDirTreePkg2(WzReader& reader, const std::vector<uint8_t>& cryptoKey,
+                       const std::string& debugLabel = "") {
     WzNode root;
 
     int32_t encryptedEntryCount = reader.readCompressedInt32();
@@ -474,6 +475,22 @@ WzNode readDirTreePkg2(WzReader& reader, const std::vector<uint8_t>& cryptoKey) 
 
     // encryptedOffsetCount 읽기 — encryptedEntryCount 와 일치해야 hashOffset 섹션 유효
     int32_t encryptedOffsetCount = reader.readCompressedInt32();
+
+    // ── 디버그 출력 ──
+    if (!debugLabel.empty()) {
+        std::cerr << "[PKG2 DBG] " << debugLabel
+                  << " | encryptedEntryCount=" << encryptedEntryCount
+                  << " | entries=" << entries.size()
+                  << " | encryptedOffsetCount=" << encryptedOffsetCount
+                  << " | match=" << (encryptedOffsetCount == encryptedEntryCount ? "YES" : "NO")
+                  << "\n";
+        int imgCount = 0, dirCount = 0;
+        for (auto& e : entries) {
+            if (e.nodeType == 0x04) imgCount++;
+            else dirCount++;
+        }
+        std::cerr << "         dirs=" << dirCount << " imgs=" << imgCount << "\n";
+    }
 
     std::vector<std::string> dirNames;
 
@@ -518,9 +535,10 @@ WzNode loadSingleWzTree(const std::string& path, const std::vector<uint8_t>& cry
     if (!f.is_open()) throw std::runtime_error("파일 열기 실패: " + path);
     WzReader r(f);
     WzHeader h = readHeader(r, path);
+    std::string label = std::filesystem::path(path).filename().string();
     r.seek(h.dataStartPosition);
     if (h.signature == WZ_SIG_PKG2) {
-        return readDirTreePkg2(r, cryptoKey);
+        return readDirTreePkg2(r, cryptoKey, label);
     }
     return readDirTree(r, h, cryptoKey);
 }
@@ -560,6 +578,7 @@ WzNode loadWzFolder(const std::string& folderPath, const std::vector<uint8_t>& c
             lastIdx = i;
         }
     }
+    std::cerr << "[loadWzFolder] " << name << " lastIdx=" << lastIdx << "\n";
 
     // 3. 분할 파일 merge: Character_000.wz …
     for (int i = 0; i <= lastIdx; i++) {
