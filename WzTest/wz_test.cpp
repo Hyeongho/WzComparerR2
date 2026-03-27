@@ -575,18 +575,18 @@ WzNode loadWzFolder(const std::string& folderPath, const std::vector<uint8_t>& c
 }
 
 // ================================================================
-// 노드 트리 출력
+// 노드 트리 출력 (out: 콘솔·파일 양쪽 가능)
 // ================================================================
-void printTree(const WzNode& node, int depth, int maxDepth,
+void printTree(std::ostream& out, const WzNode& node, int depth, int maxDepth,
                int& totalNodes, int& totalImages, int& totalDirs) {
     std::string indent(depth * 2, ' ');
     std::string typeTag = (node.type == WzNodeType::Image) ? "[IMG]" : "[DIR]";
 
     if (depth > 0) {
-        std::cout << indent << typeTag << " " << node.name;
+        out << indent << typeTag << " " << node.name;
         if (!node.children.empty())
-            std::cout << "  (" << node.children.size() << " 개 자식)";
-        std::cout << "\n";
+            out << "  (" << node.children.size() << " 개 자식)";
+        out << "\n";
     }
 
     if (node.type == WzNodeType::Image) totalImages++;
@@ -595,7 +595,7 @@ void printTree(const WzNode& node, int depth, int maxDepth,
 
     if (depth < maxDepth) {
         for (const auto& child : node.children) {
-            printTree(child, depth + 1, maxDepth, totalNodes, totalImages, totalDirs);
+            printTree(out, child, depth + 1, maxDepth, totalNodes, totalImages, totalDirs);
         }
     }
 }
@@ -788,23 +788,40 @@ int main(int argc, char* argv[]) {
             }
         }
 
+        // ── 트리 문서 파일 준비 ──
+        // <wzname>_tree.txt 로 자동 저장 (콘솔에도 동시 출력)
+        std::string treePath =
+            std::filesystem::path(wzPath).stem().string() + "_tree.txt";
+        std::ofstream treeFile(treePath);
+        if (!treeFile.is_open())
+            std::cerr << "[경고] 트리 파일을 만들 수 없습니다: " << treePath << "\n";
+
+        TeeStreambuf treeTee(std::cout.rdbuf(),
+                            treeFile.is_open() ? treeFile.rdbuf() : std::cout.rdbuf());
+        std::ostream treeOut(&treeTee);
+
         // ── 출력 ──
-        std::cout << "[노드 트리] (최대 깊이: " << maxDepth << ")\n";
-        std::cout << "[ROOT] " << root.name
-                  << "  (" << root.children.size() << " 개 자식)\n";
+        treeOut << "[노드 트리] (최대 깊이: " << maxDepth << ")\n";
+        treeOut << "[ROOT] " << root.name
+                << "  (" << root.children.size() << " 개 자식)\n";
 
         int totalNodes = 0, totalImages = 0, totalDirs = 0;
-        printTree(root, 0, maxDepth, totalNodes, totalImages, totalDirs);
+        printTree(treeOut, root, 0, maxDepth, totalNodes, totalImages, totalDirs);
 
-        std::cout << "\n[요약]\n";
-        std::cout << "  총 노드   : " << totalNodes  << "\n";
-        std::cout << "  IMG 파일  : " << totalImages  << "\n";
-        std::cout << "  디렉토리  : " << totalDirs    << "\n";
+        treeOut << "\n[요약]\n";
+        treeOut << "  총 노드   : " << totalNodes  << "\n";
+        treeOut << "  IMG 파일  : " << totalImages  << "\n";
+        treeOut << "  디렉토리  : " << totalDirs    << "\n";
 
         if (totalNodes > 0)
-            std::cout << "\n결과: WZ 파일이 정상적으로 열렸습니다.\n";
+            treeOut << "\n결과: WZ 파일이 정상적으로 열렸습니다.\n";
         else
-            std::cout << "\n경고: 노드가 0개입니다. 파일 형식을 확인하세요.\n";
+            treeOut << "\n경고: 노드가 0개입니다. 파일 형식을 확인하세요.\n";
+
+        if (treeFile.is_open()) {
+            treeFile.close();
+            std::cerr << "트리 저장 완료: " << treePath << "\n";
+        }
 
     } catch (const std::exception& ex) {
         std::cerr << "\n[오류] " << ex.what() << "\n";
