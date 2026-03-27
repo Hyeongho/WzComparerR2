@@ -423,6 +423,94 @@ WzNode readDirTree(WzReader& reader,
 }
 
 // ================================================================
+// PKG2 디렉토리 트리 읽기 (Wz_File.ReadDirTreePkg2 동일 로직)
+//
+// PKG1 과의 핵심 차이:
+//   PKG1 엔트리: [nodeType][name][size][cs32][hashOffset(4B)]
+//   PKG2 엔트리: [nodeType][name][size][cs32]  ← hashOffset 없음!
+//               hashOffset 은 엔트리 목록 뒤에 별도 섹션으로 모아서 읽음
+//
+// 루프 종료 조건 (terminator):
+//   nodeType == 0x80
+//   OR (encryptedEntryCount 가 [-127,127] 범위이고
+//       nodeType == (uint8_t)(int8_t)encryptedEntryCount)
+// ================================================================
+WzNode readDirTreePkg2(WzReader& reader, const std::vector<uint8_t>& cryptoKey) {
+    WzNode root;
+
+    int32_t encryptedEntryCount = reader.readCompressedInt32();
+
+    // 엔트리 임시 저장 (hashOffset 은 뒤에서 읽음)
+    struct Pkg2Entry {
+        uint8_t     nodeType;
+        std::string name;
+        int32_t     size;
+        int32_t     checksum;
+    };
+    std::vector<Pkg2Entry> entries;
+
+    // 엔트리 목록 읽기 (terminator 까지)
+    while (true) {
+        uint8_t nodeType = reader.readU8();
+
+        if (nodeType == 0x03 || nodeType == 0x04) {
+            std::string name = reader.readString(cryptoKey);
+            int32_t size = reader.readCompressedInt32();
+            int32_t cs32 = reader.readCompressedInt32();
+            entries.push_back({ nodeType, name, size, cs32 });
+        } else if (nodeType == 0x80 ||
+                   (encryptedEntryCount >= -127 && encryptedEntryCount <= 127 &&
+                    nodeType == static_cast<uint8_t>(static_cast<int8_t>(encryptedEntryCount)))) {
+            // terminator: 1바이트 되돌림 (C# 동일)
+            reader.seek(reader.tell() - std::streamoff(1));
+            break;
+        } else {
+            throw std::runtime_error(
+                "알 수 없는 PKG2 노드 타입: 0x" +
+                (std::ostringstream() << std::hex << (int)nodeType).str()
+            );
+        }
+    }
+
+    // encryptedOffsetCount 읽기 — encryptedEntryCount 와 일치해야 hashOffset 섹션 유효
+    int32_t encryptedOffsetCount = reader.readCompressedInt32();
+
+    std::vector<std::string> dirNames;
+
+    if (encryptedOffsetCount == encryptedEntryCount && !entries.empty()) {
+        for (auto& entry : entries) {
+            /*uint32_t hashOffset =*/ reader.readU32(); // hashOffset (건너뜀)
+            // pos = hashOffset 읽은 직후 (C# 설계 동일)
+
+            WzNode node;
+            node.name = entry.name;
+            if (entry.nodeType == 0x04) {
+                node.type = WzNodeType::Image;
+            } else { // 0x03
+                node.type = WzNodeType::Directory;
+                dirNames.push_back(entry.name);
+            }
+            root.children.push_back(std::move(node));
+        }
+    }
+
+    // 하위 디렉토리 재귀 읽기
+    for (auto& dirName : dirNames) {
+        WzNode subTree = readDirTreePkg2(reader, cryptoKey);
+        subTree.name = dirName;
+        for (auto& child : root.children) {
+            if (child.name == dirName && child.type == WzNodeType::Directory) {
+                child.children = std::move(subTree.children);
+                break;
+            }
+        }
+    }
+
+    root.childCount = (int)root.children.size();
+    return root;
+}
+
+// ================================================================
 // 단일 WZ 파일 트리 읽기 헬퍼
 // ================================================================
 WzNode loadSingleWzTree(const std::string& path, const std::vector<uint8_t>& cryptoKey) {
@@ -431,6 +519,9 @@ WzNode loadSingleWzTree(const std::string& path, const std::vector<uint8_t>& cry
     WzReader r(f);
     WzHeader h = readHeader(r, path);
     r.seek(h.dataStartPosition);
+    if (h.signature == WZ_SIG_PKG2) {
+        return readDirTreePkg2(r, cryptoKey);
+    }
     return readDirTree(r, h, cryptoKey);
 }
 
