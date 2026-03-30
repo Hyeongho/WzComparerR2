@@ -93,6 +93,8 @@ struct WzHeader {
     int32_t     dataStartPosition;
     bool        encverMissing; // KMST1132+ (PKG1만 해당)
     int32_t     wzVersion;     // 검출된 버전 (0=미검출)
+    uint32_t    pkg2Hash1 = 0; // PKG2 전용
+    uint32_t    pkg2Hash2 = 0; // PKG2 전용
 };
 
 // ================================================================
@@ -343,8 +345,8 @@ WzHeader readHeader(WzReader& reader, const std::string& filePath) {
         // PKG2
         header.encverMissing = false;
         reader.seek(header.headerSize);
-        /* uint32_t hash1 = */ reader.readU32();
-        /* uint32_t hash2 = */ reader.readU32();
+        header.pkg2Hash1 = reader.readU32();
+        header.pkg2Hash2 = reader.readU32();
         header.dataStartPosition = (int32_t)reader.tell();
     }
 
@@ -423,6 +425,20 @@ WzNode readDirTree(WzReader& reader,
 }
 
 // ================================================================
+// PKG2 헬퍼: 비트 회전 (ROL32)
+// ================================================================
+static inline uint32_t rol32(uint32_t x, int n) {
+    n &= 31;
+    return (x << n) | (x >> (32 - n));
+}
+
+// KMST1196 엔트리 카운트 복호화
+// enc ^ ((hash1 << 24) + (0x7F4A7C15 * hashVersion))
+static inline int32_t decryptPkg2EntryCount(int32_t enc, uint32_t hash1, uint32_t hashVersion) {
+    return (int32_t)((uint32_t)enc ^ ((hash1 << 24) + (uint32_t)(0x7F4A7C15u * hashVersion)));
+}
+
+// ================================================================
 // PKG2 디렉토리 트리 읽기 (Wz_File.ReadDirTreePkg2 동일 로직)
 //
 // PKG1 과의 핵심 차이:
@@ -430,12 +446,14 @@ WzNode readDirTree(WzReader& reader,
 //   PKG2 엔트리: [nodeType][name][size][cs32]  ← hashOffset 없음!
 //               hashOffset 은 엔트리 목록 뒤에 별도 섹션으로 모아서 읽음
 //
-// 루프 종료 조건 (terminator):
-//   nodeType == 0x80
-//   OR (encryptedEntryCount 가 [-127,127] 범위이고
-//       nodeType == (uint8_t)(int8_t)encryptedEntryCount)
+// 포맷 감지 (하이브리드):
+//   KMST1196 (count-based):  hashVersionV1 = ROL(hash1,7)^hash2
+//                             actualCount = decryptPkg2EntryCount(enc, hash1, hashVersionV1)
+//                             1 <= actualCount <= 65535 이면 KMST1196
+//   KMST1197 (terminator-based): 그 외
 // ================================================================
 WzNode readDirTreePkg2(WzReader& reader, const std::vector<uint8_t>& cryptoKey,
+                       uint32_t hash1, uint32_t hash2,
                        const std::string& debugLabel = "") {
     WzNode root;
 
@@ -450,45 +468,73 @@ WzNode readDirTreePkg2(WzReader& reader, const std::vector<uint8_t>& cryptoKey,
     };
     std::vector<Pkg2Entry> entries;
 
-    // 엔트리 목록 읽기 (terminator 까지)
-    while (true) {
-        uint8_t nodeType = reader.readU8();
+    // ── 포맷 감지 ──
+    uint32_t hashVersionV1 = rol32(hash1, 7) ^ hash2;
+    int32_t actualCountV1 = decryptPkg2EntryCount(encryptedEntryCount, hash1, hashVersionV1);
+    bool useCountBased = (actualCountV1 >= 1 && actualCountV1 <= 65535);
 
-        if (nodeType == 0x03 || nodeType == 0x04) {
+    if (!debugLabel.empty()) {
+        std::cout << "[PKG2 DBG] " << debugLabel
+                  << " encryptedEntryCount=" << encryptedEntryCount
+                  << " hashVersionV1=0x" << std::hex << hashVersionV1 << std::dec
+                  << " actualCountV1=" << actualCountV1
+                  << " mode=" << (useCountBased ? "KMST1196(count-based)" : "KMST1197(terminator-based)")
+                  << "\n";
+        std::cout.flush();
+    }
+
+    if (useCountBased) {
+        // ── KMST1196: count-based 루프 ──
+        for (int i = 0; i < actualCountV1; i++) {
+            uint8_t nodeType = reader.readU8();
+            if (nodeType != 0x03 && nodeType != 0x04) {
+                // 예상치 못한 바이트 → 1바이트 되돌리고 루프 중단
+                reader.seek(reader.tell() - std::streamoff(1));
+                break;
+            }
             std::string name = reader.readString(cryptoKey);
             int32_t size = reader.readCompressedInt32();
             int32_t cs32 = reader.readCompressedInt32();
             entries.push_back({ nodeType, name, size, cs32 });
-        } else if (nodeType == 0x80 ||
-                   (encryptedEntryCount >= -127 && encryptedEntryCount <= 127 &&
-                    nodeType == static_cast<uint8_t>(static_cast<int8_t>(encryptedEntryCount)))) {
-            // terminator: 1바이트 되돌림 (C# 동일)
-            reader.seek(reader.tell() - std::streamoff(1));
-            break;
-        } else {
-            std::cout << "[PKG2 DBG] " << debugLabel
-                      << " encryptedEntryCount=" << encryptedEntryCount
-                      << " entries_so_far=" << entries.size()
-                      << " unknown_nodeType=0x" << std::hex << (int)nodeType << std::dec
-                      << " at_pos=" << reader.tell() << "\n";
-            std::cout.flush();
-            throw std::runtime_error(
-                "알 수 없는 PKG2 노드 타입: 0x" +
-                (std::ostringstream() << std::hex << (int)nodeType).str()
-            );
+        }
+    } else {
+        // ── KMST1197: terminator-based 루프 ──
+        while (true) {
+            uint8_t nodeType = reader.readU8();
+
+            if (nodeType == 0x03 || nodeType == 0x04) {
+                std::string name = reader.readString(cryptoKey);
+                int32_t size = reader.readCompressedInt32();
+                int32_t cs32 = reader.readCompressedInt32();
+                entries.push_back({ nodeType, name, size, cs32 });
+            } else {
+                // 어떤 바이트든 terminator로 처리 (1바이트 되돌림)
+                reader.seek(reader.tell() - std::streamoff(1));
+                break;
+            }
         }
     }
 
-    // encryptedOffsetCount 읽기 — encryptedEntryCount 와 일치해야 hashOffset 섹션 유효
+    // encryptedOffsetCount 읽기
     int32_t encryptedOffsetCount = reader.readCompressedInt32();
+
+    // ── 매치 조건 ──
+    // KMST1196: decrypt(encOffsetCount) == actualCountV1
+    // KMST1197: raw encOffsetCount == encryptedEntryCount
+    bool matchOk;
+    if (useCountBased) {
+        int32_t actualOffsetCount = decryptPkg2EntryCount(encryptedOffsetCount, hash1, hashVersionV1);
+        matchOk = (actualOffsetCount == actualCountV1);
+    } else {
+        matchOk = (encryptedOffsetCount == encryptedEntryCount);
+    }
 
     // ── 디버그 출력 ──
     if (!debugLabel.empty()) {
         std::cout << "[PKG2 DBG] " << debugLabel
-                  << " | encryptedEntryCount=" << encryptedEntryCount
                   << " | entries=" << entries.size()
                   << " | encryptedOffsetCount=" << encryptedOffsetCount
-                  << " | match=" << (encryptedOffsetCount == encryptedEntryCount ? "YES" : "NO")
+                  << " | match=" << (matchOk ? "YES" : "NO")
                   << "\n";
         int imgCount = 0, dirCount = 0;
         for (auto& e : entries) {
@@ -496,14 +542,14 @@ WzNode readDirTreePkg2(WzReader& reader, const std::vector<uint8_t>& cryptoKey,
             else dirCount++;
         }
         std::cout << "         dirs=" << dirCount << " imgs=" << imgCount << "\n";
+        std::cout.flush();
     }
 
     std::vector<std::string> dirNames;
 
-    if (encryptedOffsetCount == encryptedEntryCount && !entries.empty()) {
+    if (matchOk && !entries.empty()) {
         for (auto& entry : entries) {
             /*uint32_t hashOffset =*/ reader.readU32(); // hashOffset (건너뜀)
-            // pos = hashOffset 읽은 직후 (C# 설계 동일)
 
             WzNode node;
             node.name = entry.name;
@@ -519,7 +565,7 @@ WzNode readDirTreePkg2(WzReader& reader, const std::vector<uint8_t>& cryptoKey,
 
     // 하위 디렉토리 재귀 읽기
     for (auto& dirName : dirNames) {
-        WzNode subTree = readDirTreePkg2(reader, cryptoKey);
+        WzNode subTree = readDirTreePkg2(reader, cryptoKey, hash1, hash2);
         subTree.name = dirName;
         for (auto& child : root.children) {
             if (child.name == dirName && child.type == WzNodeType::Directory) {
@@ -544,7 +590,7 @@ WzNode loadSingleWzTree(const std::string& path, const std::vector<uint8_t>& cry
     std::string label = std::filesystem::path(path).filename().string();
     r.seek(h.dataStartPosition);
     if (h.signature == WZ_SIG_PKG2) {
-        return readDirTreePkg2(r, cryptoKey, label);
+        return readDirTreePkg2(r, cryptoKey, h.pkg2Hash1, h.pkg2Hash2, label);
     }
     return readDirTree(r, h, cryptoKey);
 }
