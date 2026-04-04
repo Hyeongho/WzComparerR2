@@ -446,11 +446,10 @@ static inline int32_t decryptPkg2EntryCount(int32_t enc, uint32_t hash1, uint32_
 //   PKG2 엔트리: [nodeType][name][size][cs32]  ← hashOffset 없음!
 //               hashOffset 은 엔트리 목록 뒤에 별도 섹션으로 모아서 읽음
 //
-// 포맷 감지 (하이브리드):
-//   KMST1196 (count-based):  hashVersionV1 = ROL(hash1,7)^hash2
-//                             actualCount = decryptPkg2EntryCount(enc, hash1, hashVersionV1)
-//                             1 <= actualCount <= 65535 이면 KMST1196
-//   KMST1197 (terminator-based): 그 외
+// terminator 조건 (C# ReadDirTreePkg2 동일):
+//   nodeType == 0x80  →  KMST1197: encryptedEntryCount 가 5바이트(0x80 시작)
+//   nodeType == encryptedEntryCount (1바이트 범위)  →  KMST1196
+// match 조건: encryptedOffsetCount == encryptedEntryCount (raw equality)
 // ================================================================
 WzNode readDirTreePkg2(WzReader& reader, const std::vector<uint8_t>& cryptoKey,
                        uint32_t hash1, uint32_t hash2,
@@ -468,80 +467,51 @@ WzNode readDirTreePkg2(WzReader& reader, const std::vector<uint8_t>& cryptoKey,
     };
     std::vector<Pkg2Entry> entries;
 
-    // ── 포맷 감지 ──
-    uint32_t hashVersionV1 = rol32(hash1, 7) ^ hash2;
-    int32_t actualCountV1 = decryptPkg2EntryCount(encryptedEntryCount, hash1, hashVersionV1);
-    bool useCountBased = (actualCountV1 >= 1 && actualCountV1 <= 65535);
+    // encryptedEntryCount 가 1바이트 CompressedInt32 범위인지 판단
+    // → KMST1196: encryptedOffsetCount 의 첫 바이트 == encryptedEntryCount 로 terminator
+    // → KMST1197: encryptedEntryCount 가 5바이트(0x80 시작), terminator 는 0x80
+    bool entryCountIs1Byte = (encryptedEntryCount >= -127 && encryptedEntryCount <= 127);
 
-    if (!debugLabel.empty()) {
-        std::cout << "[PKG2 DBG] " << debugLabel
-                  << " encryptedEntryCount=" << encryptedEntryCount
-                  << " hashVersionV1=0x" << std::hex << hashVersionV1 << std::dec
-                  << " actualCountV1=" << actualCountV1
-                  << " mode=" << (useCountBased ? "KMST1196(count-based)" : "KMST1197(terminator-based)")
-                  << "\n";
-        std::cout.flush();
-    }
+    // ── C# 방식 terminator-based 루프 ──
+    while (true) {
+        uint8_t nodeType = reader.readU8();
 
-    if (useCountBased) {
-        // ── KMST1196: count-based 루프 ──
-        for (int i = 0; i < actualCountV1; i++) {
-            uint8_t nodeType = reader.readU8();
-            if (nodeType != 0x03 && nodeType != 0x04) {
-                // 예상치 못한 바이트 → 1바이트 되돌리고 루프 중단
-                reader.seek(reader.tell() - std::streamoff(1));
-                break;
-            }
+        if (nodeType == 0x03 || nodeType == 0x04) {
             std::string name = reader.readString(cryptoKey);
             int32_t size = reader.readCompressedInt32();
             int32_t cs32 = reader.readCompressedInt32();
             entries.push_back({ nodeType, name, size, cs32 });
-        }
-    } else {
-        // ── KMST1197: terminator-based 루프 ──
-        while (true) {
-            uint8_t nodeType = reader.readU8();
-
-            if (nodeType == 0x03 || nodeType == 0x04) {
-                std::string name = reader.readString(cryptoKey);
-                int32_t size = reader.readCompressedInt32();
-                int32_t cs32 = reader.readCompressedInt32();
-                entries.push_back({ nodeType, name, size, cs32 });
-            } else {
-                // 어떤 바이트든 terminator로 처리 (1바이트 되돌림)
-                reader.seek(reader.tell() - std::streamoff(1));
-                break;
-            }
+        } else if (nodeType == 0x80 ||
+                   (entryCountIs1Byte &&
+                    nodeType == (uint8_t)(int8_t)encryptedEntryCount)) {
+            // terminator: encryptedOffsetCount 의 첫 바이트이므로 1바이트 되돌림
+            reader.seek(reader.tell() - std::streamoff(1));
+            break;
+        } else {
+            // 알 수 없는 바이트 → graceful 종료 (C# 은 throw, 우리는 조용히 중단)
+            reader.seek(reader.tell() - std::streamoff(1));
+            break;
         }
     }
 
-    // encryptedOffsetCount 읽기
+    // encryptedOffsetCount 읽기 + match 조건 (C# 동일: raw equality)
     int32_t encryptedOffsetCount = reader.readCompressedInt32();
-
-    // ── 매치 조건 ──
-    // KMST1196: decrypt(encOffsetCount) == actualCountV1
-    // KMST1197: raw encOffsetCount == encryptedEntryCount
-    bool matchOk;
-    if (useCountBased) {
-        int32_t actualOffsetCount = decryptPkg2EntryCount(encryptedOffsetCount, hash1, hashVersionV1);
-        matchOk = (actualOffsetCount == actualCountV1);
-    } else {
-        matchOk = (encryptedOffsetCount == encryptedEntryCount);
-    }
+    bool matchOk = (encryptedOffsetCount == encryptedEntryCount);
 
     // ── 디버그 출력 ──
     if (!debugLabel.empty()) {
-        std::cout << "[PKG2 DBG] " << debugLabel
-                  << " | entries=" << entries.size()
-                  << " | encryptedOffsetCount=" << encryptedOffsetCount
-                  << " | match=" << (matchOk ? "YES" : "NO")
-                  << "\n";
         int imgCount = 0, dirCount = 0;
         for (auto& e : entries) {
             if (e.nodeType == 0x04) imgCount++;
             else dirCount++;
         }
-        std::cout << "         dirs=" << dirCount << " imgs=" << imgCount << "\n";
+        std::cout << "[PKG2 DBG] " << debugLabel
+                  << " enc=" << encryptedEntryCount
+                  << (entryCountIs1Byte ? "[1B]" : "[5B]")
+                  << " entries=" << entries.size()
+                  << " (dirs=" << dirCount << " imgs=" << imgCount << ")"
+                  << " match=" << (matchOk ? "YES" : "NO")
+                  << "\n";
         std::cout.flush();
     }
 
@@ -565,7 +535,8 @@ WzNode readDirTreePkg2(WzReader& reader, const std::vector<uint8_t>& cryptoKey,
 
     // 하위 디렉토리 재귀 읽기
     for (auto& dirName : dirNames) {
-        WzNode subTree = readDirTreePkg2(reader, cryptoKey, hash1, hash2);
+        std::string subLabel = debugLabel.empty() ? "" : debugLabel + "/" + dirName;
+        WzNode subTree = readDirTreePkg2(reader, cryptoKey, hash1, hash2, subLabel);
         subTree.name = dirName;
         for (auto& child : root.children) {
             if (child.name == dirName && child.type == WzNodeType::Directory) {
@@ -713,13 +684,17 @@ int main(int argc, char* argv[]) {
     int maxDepth = 3;
     std::string outputPath;
 
-    // ── CLI 인수 파싱: -o <출력파일> ──
+    // ── CLI 인수 파싱: -o <출력파일>, -d <depth> ──
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
         if ((arg == "-o" || arg == "--output") && i + 1 < argc) {
             outputPath = argv[++i];
         } else if (arg.rfind("-o", 0) == 0 && arg.size() > 2) {
             outputPath = arg.substr(2); // -o<path> 형태
+        } else if ((arg == "-d" || arg == "--depth") && i + 1 < argc) {
+            maxDepth = std::stoi(argv[++i]);
+        } else if (arg.rfind("-d", 0) == 0 && arg.size() > 2) {
+            maxDepth = std::stoi(arg.substr(2)); // -d<N> 형태
         }
     }
 
