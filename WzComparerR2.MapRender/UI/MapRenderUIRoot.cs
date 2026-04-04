@@ -37,6 +37,8 @@ namespace WzComparerR2.MapRender.UI
         public UITopBar TopBar { get; private set; }
         public UIChatBox ChatBox { get; private set; }
         public UITeleport Teleport { get; private set; }
+        public bool CtrlOn => this._ctrlPressed;
+        private bool _ctrlPressed;
 
         private void InitializeComponents()
         {
@@ -121,6 +123,7 @@ namespace WzComparerR2.MapRender.UI
             {
                 wnd.JumpToCurrentMap();
             }
+            wnd.EnableButtons();
         }
 
         private void Teleport_Visible(object sender, RoutedEventArgs e)
@@ -128,6 +131,7 @@ namespace WzComparerR2.MapRender.UI
             UITeleport wnd = sender as UITeleport;
             wnd.Left = (int)Math.Max(0, (this.Width - wnd.Width) / 2);
             wnd.Top = (int)Math.Max(0, (this.Height - wnd.Height) / 2);
+            wnd.EnableButtons();
         }
 
         public void LoadContent(object contentManager)
@@ -261,6 +265,16 @@ namespace WzComparerR2.MapRender.UI
         protected virtual void OnInputUpdated(EventArgs e)
         {
             this.InputUpdated?.Invoke(this, e);
+        }
+
+        public void OnCtrlKeyDown()
+        {
+            this._ctrlPressed = true;
+        }
+
+        public void OnCtrlKeyUp()
+        {
+            this._ctrlPressed = false;
         }
     }
 }

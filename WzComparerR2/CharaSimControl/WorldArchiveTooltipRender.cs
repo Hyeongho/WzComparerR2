@@ -3,8 +3,10 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Security.Cryptography;
+using System.Text.RegularExpressions;
 using WzComparerR2.CharaSim;
 using WzComparerR2.PluginBase;
+using WzComparerR2.WzLib;
 using static WzComparerR2.CharaSimControl.RenderHelper;
 using Resource = CharaSimResource.Resource;
 
@@ -48,7 +50,7 @@ namespace WzComparerR2.CharaSimControl
                     foreach (var pos in linePos)
                     {
                         g.CompositingMode = System.Drawing.Drawing2D.CompositingMode.SourceCopy;
-                        DrawV6SkillDotline(g, 12, baseBmp.Width - 12, pos);
+                        RenderHelper.DrawV6SkillDotline(g, 12, baseBmp.Width - 12, pos, GearGraphics.is22aniStyle);
                         g.CompositingMode = System.Drawing.Drawing2D.CompositingMode.SourceOver;
                     }
                     sx += baseBmp.Width;
@@ -73,6 +75,10 @@ namespace WzComparerR2.CharaSimControl
                 waDesc = "(정보 없음)";
             }
             waDesc = waDesc.Replace("#e", "#$^e").Replace("#n", "#$$");
+            waDesc = Regex.Replace(waDesc, $@"#s#(.+?)#s#", m =>
+            {
+                return "#$^s" + m.Groups[1].Value + "#$$";
+            });
 
             var waColorTable = new Dictionary<string, Color>()
             {
@@ -81,6 +87,7 @@ namespace WzComparerR2.CharaSimControl
             var waFontTable = new Dictionary<string, Font>()
             {
                 { "^e", GearGraphics.EquipMDMoris9FontBold },
+                { "^s", GearGraphics.EquipMDMoris9FontStrikeout },
             };
 
             bool drawLines = false;
@@ -170,17 +177,6 @@ namespace WzComparerR2.CharaSimControl
             return orgText.Split(new string[] { "\r\n", "\\r\\n", "\\r", "\\n", "\r", "\n" }, StringSplitOptions.None);
         }
 
-        private void DrawV6SkillDotline(Graphics g, int x1, int x2, int y)
-        {
-            // here's a trick that we won't draw left and right part because it looks the same as background border.
-            var picCenter = GearGraphics.is22aniStyle ? Resource.UIToolTipNew_img_Skill_Frame_dotline_c : Resource.UIToolTip_img_Skill_Frame_dotline_c;
-            using (var brush = new TextureBrush(picCenter))
-            {
-                brush.TranslateTransform(x1, y);
-                g.FillRectangle(brush, new Rectangle(x1, y, x2 - x1, picCenter.Height));
-            }
-        }
-
         private Bitmap GetSpecialMobBitmap(int mobID)
         {
             BitmapOrigin mobBitmap = BitmapOrigin.CreateFromNode(PluginManager.FindWz(@$"UI\UIworldArchive.img\image\mob\{mobID}", this.SourceWzFile), PluginManager.FindWz, this.SourceWzFile);
@@ -189,25 +185,65 @@ namespace WzComparerR2.CharaSimControl
 
         private Bitmap GetSpecialNpcBitmap(int npcID)
         {
-            BitmapOrigin npcBitmap = BitmapOrigin.CreateFromNode(PluginManager.FindWz(@$"UI\UIworldArchive.img\illust\npc\{npcID}", this.SourceWzFile), PluginManager.FindWz, this.SourceWzFile);
-            if (npcBitmap.Bitmap == null) return null;
-            else
+            List<BitmapOrigin> list = new List<BitmapOrigin>();
+            Wz_Node illustNode = PluginManager.FindWz(@$"UI\UIworldArchive.img\illust\npc\{npcID}", this.SourceWzFile);
+            if (illustNode != null)
             {
-                Bitmap npcBmp = npcBitmap.Bitmap;
-                Bitmap specialNpcTooltip = new Bitmap(npcBmp.Width / 2 + 20, npcBmp.Height / 2 + Resource.WorldArchive.Height + 32);
+                if (illustNode.Value is Wz_Png)
+                {
+                    list.Add(BitmapOrigin.CreateFromNode(illustNode, PluginManager.FindWz, this.SourceWzFile));
+                }
+                else
+                {
+                    foreach (var page in illustNode.Nodes)
+                    {
+                        if (page.Value is Wz_Png)
+                        {
+                            list.Add(BitmapOrigin.CreateFromNode(page, PluginManager.FindWz, this.SourceWzFile));
+                        }
+                    }
+                }
+            }
+
+            int finalWidth = Resource.WorldArchive.Width + 14;
+            int finalHeight = Resource.WorldArchive.Height + 32;
+            bool doDraw = false;
+            foreach (var bo in list)
+            {
+                if (bo.Bitmap != null)
+                {
+                    finalWidth = Math.Max(finalWidth, bo.Bitmap.Width / 2 + 20);
+                    finalHeight += bo.Bitmap.Height / 2;
+                    doDraw = true;
+                }
+            }
+
+            if (doDraw)
+            {
+                Bitmap specialNpcTooltip = new Bitmap(finalWidth, finalHeight);
                 using (Graphics g = Graphics.FromImage(specialNpcTooltip))
                 {
-                    GearGraphics.DrawNewTooltipBack(g, 0, 0, specialNpcTooltip.Width, specialNpcTooltip.Height);
                     int picH = 12;
+                    GearGraphics.DrawNewTooltipBack(g, 0, 0, specialNpcTooltip.Width, specialNpcTooltip.Height);
                     g.DrawImage(Resource.WorldArchive, 14, picH, new Rectangle(0, 0, Resource.WorldArchive.Width, Resource.WorldArchive.Height), GraphicsUnit.Pixel);
                     picH += 10 + Resource.WorldArchive.Height;
-                    //g.DrawImage(npcBmp, 10, picH, new Rectangle(0, 0, npcBmp.Width, npcBmp.Height), GraphicsUnit.Pixel);
+
                     g.InterpolationMode = InterpolationMode.NearestNeighbor;
-                    g.DrawImage(npcBmp, new Rectangle(10, picH, npcBmp.Width / 2, npcBmp.Height / 2));
+                    foreach (var bo in list)
+                    {
+                        if (bo.Bitmap != null)
+                        {
+                            Bitmap npcBmp = bo.Bitmap;
+                            //g.DrawImage(npcBmp, 10, picH, new Rectangle(0, 0, npcBmp.Width, npcBmp.Height), GraphicsUnit.Pixel);
+                            g.DrawImage(npcBmp, new Rectangle(10, picH, npcBmp.Width / 2, npcBmp.Height / 2));
+                            picH += npcBmp.Height / 2;
+                            npcBmp.Dispose();
+                        }
+                    }
                 }
-                npcBmp.Dispose();
                 return specialNpcTooltip;
             }
+            else return null;
         }
     }
 }

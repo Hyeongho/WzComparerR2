@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Text;
 using System.Drawing;
+using CharaSimResource;
 
 namespace WzComparerR2.CharaSimControl
 {
@@ -37,8 +38,8 @@ namespace WzComparerR2.CharaSimControl
         {
             var x = block.Position.X + offset.X;
             var y = block.Position.Y + offset.Y;
-            GearGraphics.DrawPlainText(g, block.Text, block.Font, ((SolidBrush)block.Brush).Color, x, width - 2, ref y, lineHeight, strictlyAlignLeft: 2);
-
+            GearGraphics.DrawString(g, block.Text, block.Font, new Dictionary<string, Color>() { { "c", GearGraphics.SkillSummaryOrangeTextColor } }, x, width - 2, ref y, lineHeight, strictlyAlignLeft: 2, defaultColor: ((SolidBrush)block.Brush).Color);
+            
             offsetY = y - (block.Position.Y + offset.Y) - lineHeight;
         }
 
@@ -55,6 +56,17 @@ namespace WzComparerR2.CharaSimControl
                 }
             }
             return rect;
+        }
+
+        public static void DrawV6SkillDotline(Graphics g, int x1, int x2, int y, bool use22Ani)
+        {
+            // here's a trick that we won't draw left and right part because it looks the same as background border.
+            var picCenter = use22Ani ? Resource.UIToolTipNew_img_Skill_Frame_dotline_c : Resource.UIToolTip_img_Skill_Frame_dotline_c;
+            using (var brush = new TextureBrush(picCenter))
+            {
+                brush.TranslateTransform(x1, y);
+                g.FillRectangle(brush, new Rectangle(x1, y, x2 - x1, picCenter.Height));
+            }
         }
     }
 }

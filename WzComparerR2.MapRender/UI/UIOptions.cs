@@ -27,6 +27,8 @@ namespace WzComparerR2.MapRender.UI
         public event EventHandler ResetSCRect;
         public event EventHandler ChkForceClickEvent;
 
+        private List<Button> buttons { get; set; } = new List<Button>();
+
         protected override void InitializeComponents()
         {
             Grid grid = new Grid();
@@ -100,6 +102,7 @@ namespace WzComparerR2.MapRender.UI
             btnOK.Margin = new Thickness(5);
             btnOK.Content = "확인";
             btnOK.Click += BtnOK_Click;
+            this.buttons.Add(btnOK);
 
             Button btnCancel = new Button();
             btnCancel.Width = 50;
@@ -107,6 +110,7 @@ namespace WzComparerR2.MapRender.UI
             btnCancel.Margin = new Thickness(5);
             btnCancel.Content = "취소";
             btnCancel.Click += BtnCancel_Click;
+            this.buttons.Add(btnCancel);
 
             StackPanel footerPanel = new StackPanel();
             footerPanel.HorizontalAlignment = HorizontalAlignment.Center;
@@ -130,11 +134,13 @@ namespace WzComparerR2.MapRender.UI
         private void BtnOK_Click(object sender, RoutedEventArgs e)
         {
             this.OK?.Invoke(this, EventArgs.Empty);
+            this.DisableButtons();
         }
 
         private void BtnCancel_Click(object sender, RoutedEventArgs e)
         {
             this.Cancel?.Invoke(this, EventArgs.Empty);
+            this.DisableButtons();
         }
 
         private void BtnSCReset_Click(object sender, RoutedEventArgs e)
@@ -149,24 +155,29 @@ namespace WzComparerR2.MapRender.UI
             return;
         }
 
+        private void DisableButtons()
+        {
+            foreach (var button in buttons)
+            {
+                button.IsEnabled = false;
+            }
+        }
+
+        public void EnableButtons()
+        {
+            foreach (var button in buttons)
+            {
+                button.IsEnabled = true;
+            }
+        }
+
         private UIElement GetTabContent1()
         {
             Grid grid = new Grid();
-            grid.RowDefinitions.Add(new RowDefinition() { Height = new GridLength(24, GridUnitType.Pixel) });
-            grid.RowDefinitions.Add(new RowDefinition() { Height = new GridLength(24, GridUnitType.Pixel) });
-            grid.RowDefinitions.Add(new RowDefinition() { Height = new GridLength(24, GridUnitType.Pixel) });
-            grid.RowDefinitions.Add(new RowDefinition() { Height = new GridLength(24, GridUnitType.Pixel) });
-            grid.RowDefinitions.Add(new RowDefinition() { Height = new GridLength(24, GridUnitType.Pixel) });
-            grid.RowDefinitions.Add(new RowDefinition() { Height = new GridLength(24, GridUnitType.Pixel) });
-            grid.RowDefinitions.Add(new RowDefinition() { Height = new GridLength(24, GridUnitType.Pixel) });
-            grid.RowDefinitions.Add(new RowDefinition() { Height = new GridLength(24, GridUnitType.Pixel) });
-            grid.RowDefinitions.Add(new RowDefinition() { Height = new GridLength(24, GridUnitType.Pixel) });
-            grid.RowDefinitions.Add(new RowDefinition() { Height = new GridLength(24, GridUnitType.Pixel) });
-            grid.RowDefinitions.Add(new RowDefinition() { Height = new GridLength(24, GridUnitType.Pixel) });
-            //grid.RowDefinitions.Add(new RowDefinition() { Height = new GridLength(24, GridUnitType.Pixel) });
-            //grid.RowDefinitions.Add(new RowDefinition() { Height = new GridLength(24, GridUnitType.Pixel) });
-            grid.ColumnDefinitions.Add(new ColumnDefinition());
-            grid.ColumnDefinitions.Add(new ColumnDefinition());
+            for (int i = 0; i < 13; i++)
+                grid.RowDefinitions.Add(new RowDefinition() { Height = new GridLength(24, GridUnitType.Pixel) });
+            for (int i = 0; i < 2; i++)
+                grid.ColumnDefinitions.Add(new ColumnDefinition());
 
             TextBlock lbl1 = new TextBlock();
             lbl1.VerticalAlignment = VerticalAlignment.Center;
@@ -300,6 +311,24 @@ namespace WzComparerR2.MapRender.UI
             Grid.SetColumn(chk6, 0);
             Grid.SetColumnSpan(chk6, 2);
             grid.Children.Add(chk6);
+
+            TextBlock lbl6 = new TextBlock();
+            lbl6.VerticalAlignment = VerticalAlignment.Center;
+            lbl6.Text = "시뮬레이터";
+            lbl6.Foreground = Brushes.Yellow;
+            Grid.SetRow(lbl6, 11);
+            Grid.SetColumn(lbl6, 0);
+            grid.Children.Add(lbl6);
+
+            CheckBox chk7 = new CheckBox();
+            chk7.Content = "몬스터 이동 활성화";
+            chk7.Margin = new Thickness(18, 0, 0, 0);
+            chk7.Background = Brushes.Gray;
+            chk7.SetBinding(CheckBox.IsCheckedProperty, new Binding(nameof(UIOptionsDataModel.EnableMobMovement)));
+            Grid.SetRow(chk7, 12);
+            Grid.SetColumn(chk7, 0);
+            Grid.SetColumnSpan(chk7, 2);
+            grid.Children.Add(chk7);
 
             /*TextBlock lbl6 = new TextBlock();
             lbl6.VerticalAlignment = VerticalAlignment.Center;
@@ -512,6 +541,7 @@ namespace WzComparerR2.MapRender.UI
             Grid.SetRow(btnSCReset, 6);
             Grid.SetColumn(btnSCReset, 3);
             grid.Children.Add(btnSCReset);
+            this.buttons.Add(btnSCReset);
 
             CheckBox chkForce = new CheckBox();
             chkForce.Content = "최소 크기를 현재 해상도로 맞춤";
@@ -574,7 +604,6 @@ namespace WzComparerR2.MapRender.UI
             var tips = new[]
             {
                  "단축키 :",
-                 "",
                  "[M] 미니맵",
                  "[W] 월드맵",
                  "[Esc] 설정",
@@ -586,6 +615,10 @@ namespace WzComparerR2.MapRender.UI
                  "[ScrollLock] 스크린샷",
                  "[S] 캡쳐 범위 표시",
                  "[Ctrl+S] 현재 화면만 캡쳐",
+                 "",
+                 "시뮬레이터 :",
+                 "[마우스 클릭] 몬스터 공격",
+                 "[Ctrl+마우스 클릭] 몬스터 스킬 사용"
             };
 
             foreach (var tip in tips)
@@ -647,6 +680,7 @@ namespace WzComparerR2.MapRender.UI
         private bool _worldmap_useImageNameAsInfoName;
         private bool _forceCaptureWithResolution;
         private bool _showFootholdBoundary;
+        private bool _enableMobMovement;
         private string _screenshotBackgroundColor;
         private string _scLeft;
         private string _scTop;
@@ -699,6 +733,12 @@ namespace WzComparerR2.MapRender.UI
         {
             get { return this._showFootholdBoundary; }
             set { base.SetProperty(ref this._showFootholdBoundary, value); }
+        }
+
+        public bool EnableMobMovement
+        {
+            get { return this._enableMobMovement; }
+            set { base.SetProperty(ref this._enableMobMovement, value); }
         }
 
         public string ScreenshotBackgroundColor

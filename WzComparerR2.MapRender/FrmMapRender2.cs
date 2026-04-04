@@ -139,6 +139,7 @@ namespace WzComparerR2.MapRender
         bool captureViewPortOnly;
         bool ForceCaptureWithResolution;
         bool showFootholdBoundary;
+        bool enableMobMovement;
         Task captureTask;
         Resolution resolution;
         float opacity;
@@ -188,7 +189,7 @@ namespace WzComparerR2.MapRender
             this.Components.Add(fpsCounter);
 
             this.ApplySetting();
-            SwitchResolution(Resolution.Window_800_600);
+            SwitchResolution(Resolution.Window_1366_768);
             base.Initialize();
 
             //init UI teleport
@@ -382,9 +383,11 @@ namespace WzComparerR2.MapRender
 
                         case KeyCode.LeftControl:
                             boostMoveFlag |= 0x01;
+                            this.ui.OnCtrlKeyDown();
                             break;
                         case KeyCode.RightControl:
                             boostMoveFlag |= 0x02;
+                            this.ui.OnCtrlKeyDown();
                             break;
 
                         default:
@@ -413,9 +416,11 @@ namespace WzComparerR2.MapRender
 
                         case KeyCode.LeftControl:
                             boostMoveFlag &= ~0x01;
+                            this.ui.OnCtrlKeyUp();
                             break;
                         case KeyCode.RightControl:
                             boostMoveFlag &= ~0x02;
+                            this.ui.OnCtrlKeyUp();
                             break;
                     }
                 };
@@ -637,7 +642,7 @@ namespace WzComparerR2.MapRender
             #endregion
 
             //点击事件
-            var disposable = UIHelper.RegisterClickEvent<SceneItem>(this.ui.ContentControl,
+            var disposable = UIHelper.RegisterClickEvent<SceneItem>(this.ui, this.ui.ContentControl,
                 (sender, point) =>
                 {
                     var cameraScale = this.renderEnv.Camera.Scale;
@@ -705,6 +710,7 @@ namespace WzComparerR2.MapRender
             var wnd = sender as UIOptions;
             var data = wnd.DataContext as UIOptionsDataModel;
             LoadOptionData(data);
+            wnd.EnableButtons();
         }
 
         private void SpineSelector_Visible(object sender, RoutedEventArgs e)
@@ -776,6 +782,7 @@ namespace WzComparerR2.MapRender
                     this.ui.ChatBox.AppendTextHelp(@"/minimap 미니맵 설정");
                     this.ui.ChatBox.AppendTextHelp(@"/scene 장면 설정");
                     this.ui.ChatBox.AppendTextHelp(@"/spine Spine 애니메이션 지정 창 열기");
+                    this.ui.ChatBox.AppendTextHelp(@"/summon 몬스터 소환");
                     this.ui.ChatBox.AppendTextHelp(@"/quest 퀘스트 설정");
                     this.ui.ChatBox.AppendTextHelp(@"/questex 퀘스트 키의 값 설정");
                     this.ui.ChatBox.AppendTextHelp(@"/date 시각 설정");
@@ -842,6 +849,11 @@ namespace WzComparerR2.MapRender
                     break;
                     
                 case "/minimap":
+                    if (this.mapData == null)
+                    {
+                        this.ui.ChatBox.AppendTextSystem("맵이 로드되지 않았습니다.");
+                        break;
+                    }
                     var canvasList = this.mapData?.MiniMap?.ExtraCanvas;
                     switch (arguments.ElementAtOrDefault(1))
                     {
@@ -870,6 +882,11 @@ namespace WzComparerR2.MapRender
                     break;
 
                 case "/scene":
+                    if (this.mapData == null)
+                    {
+                        this.ui.ChatBox.AppendTextSystem("맵이 로드되지 않았습니다.");
+                        break;
+                    }
                     switch (arguments.ElementAtOrDefault(1))
                     {
                         case "tag":
@@ -967,13 +984,16 @@ namespace WzComparerR2.MapRender
                     }
                     break;
 
-
-
                 case "/date":
+                    if (this.mapData == null)
+                    {
+                        this.ui.ChatBox.AppendTextSystem("맵이 로드되지 않았습니다.");
+                        break;
+                    }
                     switch (arguments.ElementAtOrDefault(1))
                     {
                         case "list":
-                            List<Tuple<long, long>> dateList = this?.mapData.Scene.Npcs.SelectMany(item => item.Date).ToList();
+                            List<Tuple<long, long>> dateList = this.mapData?.Scene.Npcs.SelectMany(item => item.Date).ToList() ?? new();
                             this.ui.ChatBox.AppendTextHelp($"관련된 시각 개수: ({dateList.Count()})");
                             foreach (Tuple<long, long> item in dateList)
                             {
@@ -1002,10 +1022,15 @@ namespace WzComparerR2.MapRender
                     break;
 
                 case "/multibgm":
+                    if (this.mapData == null)
+                    {
+                        this.ui.ChatBox.AppendTextSystem("맵이 로드되지 않았습니다.");
+                        break;
+                    }
                     switch (arguments.ElementAtOrDefault(1))
                     {
                         case "list":
-                            if (!string.IsNullOrEmpty(this.mapData.Bgm))
+                            if (!string.IsNullOrEmpty(this.mapData?.Bgm))
                             {
                                 var path = new List<string>() { "Sound" };
                                 path.AddRange(this.mapData.Bgm.Split('/'));
@@ -1063,16 +1088,21 @@ namespace WzComparerR2.MapRender
                     break;
 
                 case "/quest":
+                    if (this.mapData == null)
+                    {
+                        this.ui.ChatBox.AppendTextSystem("맵이 로드되지 않았습니다.");
+                        break;
+                    }
                     switch (arguments.ElementAtOrDefault(1))
                     {
                         case "list":
-                            List<QuestInfo> questList = this?.mapData.Scene.Back.Slots.SelectMany(item => ((BackItem)item).Quest)
-                                .Concat(this?.mapData.Scene.Layers.Nodes.SelectMany(l => ((LayerNode)l).Obj.Slots.SelectMany(item => ((ObjItem)item).Quest)))
-                                .Concat(this?.mapData.Scene.Npcs.SelectMany(item => item.Quest))
-                                .Concat(this?.mapData.Scene.Front.Slots.SelectMany(item => ((BackItem)item).Quest))
-                                .Concat(this?.mapData.Scene.Effect.Slots.Where(item => item is ParticleItem).SelectMany(item => ((ParticleItem)item).Quest))
-                                .Concat(this?.mapData.Scene.Effect.Slots.Where(item => item is ParticleItem).SelectMany(item => ((ParticleItem)item).SubItems).SelectMany(item => item.Quest))
-                                .Distinct().ToList();
+                            List<QuestInfo> questList = this.mapData?.Scene.Back.Slots.SelectMany(item => ((BackItem)item).Quest)
+                                .Concat(this.mapData.Scene.Layers.Nodes.SelectMany(l => ((LayerNode)l).Obj.Slots.SelectMany(item => ((ObjItem)item).Quest)))
+                                .Concat(this.mapData.Scene.Npcs.SelectMany(item => item.Quest))
+                                .Concat(this.mapData.Scene.Front.Slots.SelectMany(item => ((BackItem)item).Quest))
+                                .Concat(this.mapData.Scene.Effect.Slots.Where(item => item is ParticleItem).SelectMany(item => ((ParticleItem)item).Quest))
+                                .Concat(this.mapData.Scene.Effect.Slots.Where(item => item is ParticleItem).SelectMany(item => ((ParticleItem)item).SubItems).SelectMany(item => item.Quest))
+                                .Distinct().ToList() ?? new();
                             this.ui.ChatBox.AppendTextHelp($"관련된 퀘스트 개수: ({questList.Count()})");
                             foreach (QuestInfo item in questList)
                             {
@@ -1107,11 +1137,16 @@ namespace WzComparerR2.MapRender
                     break;
 
                 case "/questex":
+                    if (this.mapData == null)
+                    {
+                        this.ui.ChatBox.AppendTextSystem("맵이 로드되지 않았습니다.");
+                        break;
+                    }
                     switch (arguments.ElementAtOrDefault(1))
                     {
                         case "list":
-                            List<QuestExInfo> questList = this?.mapData.Scene.Layers.Nodes.SelectMany(l => ((LayerNode)l).Obj.Slots.SelectMany(item => ((ObjItem)item).Questex))
-                                .Distinct().ToList();
+                            List<QuestExInfo> questList = this.mapData?.Scene.Layers.Nodes.SelectMany(l => ((LayerNode)l).Obj.Slots.SelectMany(item => ((ObjItem)item).Questex))
+                                .Distinct().ToList() ?? new();
                             this.ui.ChatBox.AppendTextHelp($"관련된 퀘스트 키 개수: ({questList.Count()})");
                             foreach (QuestExInfo item in questList)
                             {
@@ -1147,6 +1182,11 @@ namespace WzComparerR2.MapRender
                     break;
 
                 case "/spine":
+                    if (this.mapData == null)
+                    {
+                        this.ui.ChatBox.AppendTextSystem("맵이 로드되지 않았습니다.");
+                        break;
+                    }
                     var uiSpineSelector = this.ui.Windows.OfType<UISpineSelector>().FirstOrDefault();
                     if (uiSpineSelector == null)
                     {
@@ -1158,15 +1198,105 @@ namespace WzComparerR2.MapRender
                         uiSpineSelector.Hide();
                     }
 
-                    var back = this?.mapData.Scene.Back.Slots.OfType<BackItem>().Where(item => item.View.Animator is ISpineAnimator)
-                        .Concat(this?.mapData.Scene.Front.Slots.OfType<BackItem>().Where(item => item.View.Animator is ISpineAnimator)).ToList();
-                    var obj = this?.mapData.Scene.Layers.Nodes.OfType<LayerNode>()
+                    var back = this.mapData?.Scene.Back.Slots.OfType<BackItem>().Where(item => item.View.Animator is ISpineAnimator)
+                        .Concat(this.mapData.Scene.Front.Slots.OfType<BackItem>().Where(item => item.View.Animator is ISpineAnimator)).ToList() ?? new();
+                    var obj = this.mapData?.Scene.Layers.Nodes.OfType<LayerNode>()
                         .Select(layerNode => layerNode.Obj.Slots.OfType<ObjItem>()
                             .Where(item => item.View.Animator is ISpineAnimator)
-                            .ToList()).ToList();
+                            .ToList()).ToList() ?? new();
                     uiSpineSelector.LoadTabContents(back, obj);
 
                     uiSpineSelector.Show();
+                    break;
+
+                case "/summon":
+                    if (this.mapData == null)
+                    {
+                        this.ui.ChatBox.AppendTextSystem("맵이 로드되지 않았습니다.");
+                        break;
+                    }
+
+                    CommandParser cp = new CommandParser(CommandParser.SummonSpecs, arguments);
+                    string si = cp.GetPositional(0);
+                    string sx = cp.GetPositional(1);
+                    string sy = cp.GetPositional(2);
+                    bool flip = cp.HasFlag("Flip");
+                    bool regen = cp.HasFlag("Regen");
+
+                    if (string.Equals(si, "preset", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var mapID = this.mapData.ID ?? 0;
+                        IReadOnlyList<string> presets;
+                        if (SummonPreset.MapPresets.TryGetValue(mapID, out presets))
+                        {
+                            if (string.Equals(sx, "list", StringComparison.OrdinalIgnoreCase))
+                            {
+                                int i = 1;
+                                this.ui.ChatBox.AppendTextHelp($"프리셋 개수: ({presets.Count})");
+                                foreach (var preset in presets)
+                                {
+                                    this.ui.ChatBox.AppendTextHelp($"{i++}: {preset}");
+                                }
+                            }
+                            else if (int.TryParse(sx, out int presetIndex))
+                            {
+                                if (presetIndex >= 1 && presetIndex <= presets.Count && SummonPreset.AllPresets.TryGetValue(presets[presetIndex - 1], out var summons))
+                                {
+                                    foreach (var summon in summons)
+                                    {
+                                        this.mapData.SummonMob(summon.MobID, summon.X, summon.Y, z0: summon.Z0, z1: summon.Z1, fh: summon.Foothold, flip: summon.Flip, playRegenMotion: summon.Regen);
+                                    }
+                                    this.ui.ChatBox.AppendTextSystem($@"{presetIndex}번 프리셋이 적용되었습니다.");
+                                }
+                                else
+                                {
+                                    this.ui.ChatBox.AppendTextSystem($@"올바르지 않은 프리셋 번호입니다.");
+                                }
+                            }
+                            else
+                            {
+                                this.ui.ChatBox.AppendTextHelp(@"/summon preset list 프리셋 목록 보기");
+                                this.ui.ChatBox.AppendTextHelp(@"/summon preset (x) x번 프리셋 실행");
+                            }
+                        }
+                        else
+                        {
+                            this.ui.ChatBox.AppendTextSystem($@"현재 맵에 사용 가능한 프리셋이 없습니다.");
+                        }
+                    }
+                    else if (int.TryParse(si, out int mobID))
+                    {
+                        int x, y;
+                        if (!int.TryParse(sx, out x) || !int.TryParse(sy, out y))
+                        {
+                            var p = this.renderEnv.Camera.CameraToWorld(renderEnv.Input.MousePosition);
+                            x = p.X;
+                            y = p.Y;
+                        }
+                        StringResult sr;
+                        string mobName = string.Empty;
+                        if (this.StringLinker != null)
+                        {
+                            this.StringLinker.StringMob.TryGetValue(mobID, out sr);
+                            mobName = sr?.Name ?? "(null)";
+                        }
+                        if (this.mapData.SummonMob(mobID, x, y, z0: 0, z1: 0, fh: -1, flip: flip, playRegenMotion: regen))
+                        {
+                            this.ui.ChatBox.AppendTextSystem($@"몬스터가 소환되었습니다. {mobName}({mobID})");
+                        }
+                        else
+                        {
+                            this.ui.ChatBox.AppendTextSystem($@"몬스터를 찾지 못했습니다. ({mobID})");
+                        }
+                    }
+                    else
+                    {
+                        this.ui.ChatBox.AppendTextHelp(@"/summon (mobID) 마우스 위치에 mobID 몬스터 소환");
+                        this.ui.ChatBox.AppendTextHelp(@"/summon (mobID) (x) (y) x, y 위치에 mobID 몬스터 소환");
+                        this.ui.ChatBox.AppendTextHelp(@"/summon preset 몬스터 소환 프리셋 사용");
+                        this.ui.ChatBox.AppendTextHelp(@"-f, --flip 좌우 반전으로 소환");
+                        this.ui.ChatBox.AppendTextHelp(@"-r, --regen 소환 시 리젠 모션 재생");
+                    }
                     break;
 
                 default:
@@ -1434,6 +1564,11 @@ namespace WzComparerR2.MapRender
             (this.Content as WcR2ContentManager).UseD2DFont = config.UseD2dRenderer;
             this.ForceCaptureWithResolution = config.ForceCaptureWithResolution;
             this.showFootholdBoundary = config.ShowFootholdBoundary;
+            this.enableMobMovement = config.EnableMobMovement;
+            if (this.mapData != null)
+            {
+                this.mapData.EnableMobMovement = this.enableMobMovement;
+            }
         }
 
         private void LoadOptionData(UIOptionsDataModel model)
@@ -1452,6 +1587,7 @@ namespace WzComparerR2.MapRender
             model.WorldMap_UseImageNameAsInfoName = this.ui.WorldMap.UseImageNameAsInfoName;
             model.ForceCaptureWithResolution = config.ForceCaptureWithResolution;
             model.ShowFootholdBoundary = config.ShowFootholdBoundary;
+            model.EnableMobMovement = config.EnableMobMovement;
             LoadCaptureRectOptionData(model);
         }
 
@@ -1472,6 +1608,7 @@ namespace WzComparerR2.MapRender
             config.WorldMap_UseImageNameAsInfoName = model.WorldMap_UseImageNameAsInfoName;
             config.ForceCaptureWithResolution = model.ForceCaptureWithResolution;
             config.ShowFootholdBoundary = model.ShowFootholdBoundary;
+            config.EnableMobMovement = model.EnableMobMovement;
             WzComparerR2.Config.ConfigManager.Save();
 
             if (int.TryParse(model.ScLeft, out int left) && int.TryParse(model.ScTop, out int top)

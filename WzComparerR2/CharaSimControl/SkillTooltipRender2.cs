@@ -73,7 +73,7 @@ namespace WzComparerR2.CharaSimControl
                 Wz_Node imgNode = PluginBase.PluginManager.FindWz(string.Format(@"Character\TamingMob\{0:D8}.img", vehicleID), this.SourceWzFile);
                 if (imgNode != null)
                 {
-                    Gear gear = Gear.CreateFromNode(imgNode, path => PluginBase.PluginManager.FindWz(path), this.SourceWzFile);
+                    Gear gear = Gear.CreateFromNode(imgNode, PluginBase.PluginManager.FindWz, this.SourceWzFile);
                     if (gear != null)
                     {
                         ridingGearBmp = RenderLinkRidingGear(gear);
@@ -109,7 +109,7 @@ namespace WzComparerR2.CharaSimControl
                 g.CompositingMode = System.Drawing.Drawing2D.CompositingMode.SourceCopy;
                 foreach (var y in splitterH)
                 {
-                    DrawV6SkillDotline(g, region.SplitterX1, region.SplitterX2, y);
+                    RenderHelper.DrawV6SkillDotline(g, region.SplitterX1, region.SplitterX2, y, this.Enable22AniStyle);
                 }
                 g.CompositingMode = System.Drawing.Drawing2D.CompositingMode.SourceOver;
             }
@@ -344,7 +344,7 @@ namespace WzComparerR2.CharaSimControl
                 Wz_Node skillNode = PluginBase.PluginManager.FindWz(string.Format(@"Skill\{0}.img\skill\{1}", Skill.AddAttackToolTipDescSkill / 10000, Skill.AddAttackToolTipDescSkill), this.SourceWzFile);
                 if (skillNode != null)
                 {
-                    Skill skill = Skill.CreateFromNode(skillNode, PluginBase.PluginManager.FindWz, PluginBase.PluginManager.FindWz, this.SourceWzFile);
+                    Skill skill = Skill.CreateFromNode(skillNode, PluginBase.PluginManager.FindWz, this.SourceWzFile);
                     icon = skill.Icon;
                 }
                 if (icon.Bitmap != null)
@@ -377,7 +377,7 @@ namespace WzComparerR2.CharaSimControl
                 Wz_Node skillNode = PluginBase.PluginManager.FindWz(string.Format(@"Skill\{0}.img\skill\{1}", Skill.AssistSkillLink / 10000, Skill.AssistSkillLink), this.SourceWzFile);
                 if (skillNode != null)
                 {
-                    Skill skill = Skill.CreateFromNode(skillNode, PluginBase.PluginManager.FindWz, PluginBase.PluginManager.FindWz, this.SourceWzFile);
+                    Skill skill = Skill.CreateFromNode(skillNode, PluginBase.PluginManager.FindWz, this.SourceWzFile);
                     icon = skill.Icon;
                 }
                 if (icon.Bitmap != null)
@@ -488,17 +488,6 @@ namespace WzComparerR2.CharaSimControl
             format.Dispose();
             g.Dispose();
             return bitmap;
-        }
-
-        private void DrawV6SkillDotline(Graphics g, int x1, int x2, int y)
-        {
-            // here's a trick that we won't draw left and right part because it looks the same as background border.
-            var picCenter = Enable22AniStyle ? Resource.UIToolTipNew_img_Skill_Frame_dotline_c : Resource.UIToolTip_img_Skill_Frame_dotline_c;
-            using (var brush = new TextureBrush(picCenter))
-            {
-                brush.TranslateTransform(x1, y);
-                g.FillRectangle(brush, new Rectangle(x1, y, x2 - x1, picCenter.Height));
-            }
         }
 
         private Bitmap RenderLinkRidingGear(Gear gear)

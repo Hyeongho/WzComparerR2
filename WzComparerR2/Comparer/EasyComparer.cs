@@ -46,7 +46,7 @@ namespace WzComparerR2.Comparer
         public bool OutputPng { get; set; }
         public bool OutputAddedImg { get; set; }
         public bool OutputRemovedImg { get; set; }
-        public bool EnableDarkMode { get; set; }
+        public List<Color> ColorTable { get; set; }
         public bool OutputGearTooltip { get; set; }
         public bool OutputItemTooltip { get; set; }
         public bool OutputMapTooltip { get; set; }
@@ -445,7 +445,6 @@ namespace WzComparerR2.Comparer
                     this.OutputPng ? "-OutputPng" : null,
                     this.OutputAddedImg ? "-OutputAddedImg" : null,
                     this.OutputRemovedImg ? "-OutputRemovedImg" : null,
-                    this.EnableDarkMode ? "-EnableDarkMode" : null,
                     "-PngComparison " + this.Comparer.PngComparison,
                     this.Comparer.ResolvePngLink ? "-ResolvePngLink" : null,
                 }.Where(p => p != null)));
@@ -783,10 +782,10 @@ namespace WzComparerR2.Comparer
                     // 변경 전후 툴팁 이미지 생성
                     for (int i = 0; i < 2; i++) // 0: New, 1: Old
                     {
-                        Skill skill = Skill.CreateFromNode(PluginManager.FindWz($@"Skill\{nodePath}", WzFileNewOld[i]), PluginManager.FindWz, PluginManager.FindWz, WzFileNewOld[i]) ??
-                            (Skill.CreateFromNode(PluginManager.FindWz($@"Skill001\{nodePath}", WzFileNewOld[i]), PluginManager.FindWz, PluginManager.FindWz, WzFileNewOld[i]) ??
-                            (Skill.CreateFromNode(PluginManager.FindWz($@"Skill002\{nodePath}", WzFileNewOld[i]), PluginManager.FindWz, PluginManager.FindWz, WzFileNewOld[i]) ??
-                            Skill.CreateFromNode(PluginManager.FindWz($@"Skill003\{nodePath}", WzFileNewOld[i]), PluginManager.FindWz, PluginManager.FindWz, WzFileNewOld[i])));
+                        Skill skill = Skill.CreateFromNode(PluginManager.FindWz($@"Skill\{nodePath}", WzFileNewOld[i]), PluginManager.FindWz, WzFileNewOld[i]) ??
+                            (Skill.CreateFromNode(PluginManager.FindWz($@"Skill001\{nodePath}", WzFileNewOld[i]), PluginManager.FindWz, WzFileNewOld[i]) ??
+                            (Skill.CreateFromNode(PluginManager.FindWz($@"Skill002\{nodePath}", WzFileNewOld[i]), PluginManager.FindWz, WzFileNewOld[i]) ??
+                            Skill.CreateFromNode(PluginManager.FindWz($@"Skill003\{nodePath}", WzFileNewOld[i]), PluginManager.FindWz, WzFileNewOld[i])));
 
                         if (skill != null)
                         {
@@ -1091,7 +1090,7 @@ namespace WzComparerR2.Comparer
                     // 변경 전후 툴팁 이미지 생성
                     for (int i = 0; i < 2; i++) // 0: New, 1: Old
                     {
-                        Mob mob = Mob.CreateFromNode(PluginManager.FindWz($@"Mob\{nodePath}", WzFileNewOld[i]), PluginManager.FindWz, PluginManager.FindWz, WzFileNewOld[i]);
+                        Mob mob = Mob.CreateFromNode(PluginManager.FindWz($@"Mob\{nodePath}", WzFileNewOld[i]), PluginManager.FindWz, WzFileNewOld[i]);
 
                         if (mob == null)
                         {
@@ -1143,7 +1142,7 @@ namespace WzComparerR2.Comparer
                     // 변경 전후 툴팁 이미지 생성
                     for (int i = 0; i < 2; i++) // 0: New, 1: Old
                     {
-                        Npc npc = Npc.CreateFromNode(PluginManager.FindWz($@"Npc\{nodePath}", WzFileNewOld[i]), PluginManager.FindWz, PluginManager.FindWz, WzFileNewOld[i]);
+                        Npc npc = Npc.CreateFromNode(PluginManager.FindWz($@"Npc\{nodePath}", WzFileNewOld[i]), PluginManager.FindWz, WzFileNewOld[i]);
 
                         if (npc == null)
                         {
@@ -1193,8 +1192,8 @@ namespace WzComparerR2.Comparer
                     // 변경 전후 툴팁 이미지 생성
                     for (int i = 0; i < 2; i++) // 0: New, 1: Old
                     {
-                        Quest quest = Quest.CreateFromNode(PluginManager.FindWz($@"Quest\QuestData\{nodePath}.img", WzFileNewOld[i]), PluginManager.FindWz, PluginManager.FindWz, WzFileNewOld[i])
-                            ?? Quest.CreateFromNode(PluginManager.FindWz($@"Quest\QuestInfo.img\{nodePath}", WzFileNewOld[i]), PluginManager.FindWz, PluginManager.FindWz, WzFileNewOld[i], questID);
+                        Quest quest = Quest.CreateFromNode(PluginManager.FindWz($@"Quest\QuestData\{nodePath}.img", WzFileNewOld[i]), PluginManager.FindWz, WzFileNewOld[i])
+                            ?? Quest.CreateFromNode(PluginManager.FindWz($@"Quest\QuestInfo.img\{nodePath}", WzFileNewOld[i]), PluginManager.FindWz, WzFileNewOld[i], questID);
 
                         if (quest == null)
                         {
@@ -1243,7 +1242,7 @@ namespace WzComparerR2.Comparer
                     // 변경 전후 툴팁 이미지 생성
                     for (int i = 0; i < 2; i++) // 0: New, 1: Old
                     {
-                        Achievement achv = Achievement.CreateFromNode(PluginManager.FindWz($@"Etc\Achievement\AchievementData\{nodePath}.img", WzFileNewOld[i]), PluginManager.FindWz, PluginManager.FindWz, WzFileNewOld[i]);
+                        Achievement achv = Achievement.CreateFromNode(PluginManager.FindWz($@"Etc\Achievement\AchievementData\{nodePath}.img", WzFileNewOld[i]), PluginManager.FindWz, WzFileNewOld[i]);
 
                         if (achv == null)
                         {
@@ -1974,7 +1973,7 @@ namespace WzComparerR2.Comparer
                 return null;
 
             Wz_Node linkNode;
-            if ((linkNode = value.GetLinkedSourceNode(path => PluginBase.PluginManager.FindWz(path, value.GetNodeWzFile()))) != value)
+            if ((linkNode = value.GetLinkedSourceNode(PluginBase.PluginManager.FindWz, value.GetNodeWzFile())) != value)
             {
                 return "(link) " + OutputNodeValue(fullPath, linkNode, col, outputDir);
             }
@@ -2101,42 +2100,24 @@ namespace WzComparerR2.Comparer
             string path = Path.Combine(outputDir, "style.css");
             if (File.Exists(path))
                 return;
+            StringBuilder css = new StringBuilder();
+            css.AppendLine($"body {{ font-size:12px; background-color:{ColorToHex(ColorTable[0])}; color:{ColorToHex(ColorTable[1])}; }}");
+            css.AppendLine($"a {{ color:{ColorToHex(ColorTable[8])}; }}");
+            css.AppendLine($"p.wzf {{ }}");
+            css.AppendLine($"table, tr, th, td {{ border:1px solid #ff8000; border-collapse:collapse; }}");
+            css.AppendLine($"table {{ margin-bottom:16px; }}");
+            css.AppendLine($"th {{ text-align:left; }}");
+            css.AppendLine($"table.lst0 {{ }}");
+            css.AppendLine($"table.lst1 {{ }}");
+            css.AppendLine($"table.lst2 {{ }}");
+            css.AppendLine($"table.img {{ }}");
+            css.AppendLine($"table.img tr.r0 {{ background-color:{ColorToHex(ColorTable[2])}; color:{ColorToHex(ColorTable[5])}; }}");
+            css.AppendLine($"table.img tr.r1 {{ background-color:{ColorToHex(ColorTable[3])}; color:{ColorToHex(ColorTable[6])}; }}");
+            css.AppendLine($"table.img tr.r2 {{ background-color:{ColorToHex(ColorTable[4])}; color:{ColorToHex(ColorTable[7])}; }}");
+            css.AppendLine($"table.img.noChange {{ display:none; }}");
             FileStream fs = new FileStream(path, FileMode.Create, FileAccess.Write);
             StreamWriter sw = new StreamWriter(fs, Encoding.UTF8);
-            if (EnableDarkMode)
-            {
-
-                sw.WriteLine("body { font-size:12px; background-color:black; color:white; }");
-                sw.WriteLine("a { color:white; }");
-                sw.WriteLine("p.wzf { }");
-                sw.WriteLine("table, tr, th, td { border:1px solid #ff8000; border-collapse:collapse; }");
-                sw.WriteLine("table { margin-bottom:16px; }");
-                sw.WriteLine("th { text-align:left; }");
-                sw.WriteLine("table.lst0 { }");
-                sw.WriteLine("table.lst1 { }");
-                sw.WriteLine("table.lst2 { }");
-                sw.WriteLine("table.img { }");
-                sw.WriteLine("table.img tr.r0 { background-color:#003049; }");
-                sw.WriteLine("table.img tr.r1 { background-color:#000000; }");
-                sw.WriteLine("table.img tr.r2 { background-color:#462306; }");
-                sw.WriteLine("table.img.noChange { display:none; }");
-            }
-            else
-            {
-                sw.WriteLine("body { font-size:12px; }");
-                sw.WriteLine("p.wzf { }");
-                sw.WriteLine("table, tr, th, td { border:1px solid #ff8000; border-collapse:collapse; }");
-                sw.WriteLine("table { margin-bottom:16px; }");
-                sw.WriteLine("th { text-align:left; }");
-                sw.WriteLine("table.lst0 { }");
-                sw.WriteLine("table.lst1 { }");
-                sw.WriteLine("table.lst2 { }");
-                sw.WriteLine("table.img { }");
-                sw.WriteLine("table.img tr.r0 { background-color:#fff4c4; }");
-                sw.WriteLine("table.img tr.r1 { background-color:#ebf2f8; }");
-                sw.WriteLine("table.img tr.r2 { background-color:#ffffff; }");
-                sw.WriteLine("table.img.noChange { display:none; }");
-            }
+            sw.Write(css.ToString());
             sw.Flush();
             sw.Close();
         }
@@ -2157,6 +2138,11 @@ namespace WzComparerR2.Comparer
                 hex.AppendFormat("{0:x2}", b);
             }
             return hex.ToString();
+        }
+        
+        private static string ColorToHex(Color color)
+        {
+            return $"#{color.R:X2}{color.G:X2}{color.B:X2}";
         }
     }
 }

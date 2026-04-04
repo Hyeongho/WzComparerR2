@@ -330,7 +330,6 @@ namespace WzComparerR2
             Wz_Structure.DefaultEncoding = enc;
             Wz_Structure.DefaultAutoDetectExtFiles = config.AutoDetectExtFiles;
             Wz_Structure.DefaultImgCheckDisabled = config.ImgCheckDisabled;
-            Wz_Structure.DefaultWzVersionVerifyMode = config.WzVersionVerifyMode;
         }
 
         private void UpdateClbRootNode()
@@ -361,21 +360,25 @@ namespace WzComparerR2
             clbRootNode.ResumeLayout();
         }
 
-        async Task<bool> AutomaticCheckUpdate()
+        async Task AutomaticCheckUpdate()
         {
-            FrmUpdater updater = new FrmUpdater();
-            return await updater.QueryUpdate();
-            // Following code is from JMS implementation
-            /*var config = WcR2Config.Default;
-            if (config.EnableAutoUpdate)
+            var config = WcR2Config.Default;
+            var updater = new Updater();
+            try
             {
-                FrmUpdater updater = new FrmUpdater();
-                return await updater.QueryUpdate();
+                await updater.QueryUpdateAsync();
+                if (updater.UpdateAvailable)
+                {
+                    ToastNotification.Show(this, $"업데이트가 가능합니다. 버전: {updater.LatestVersionString}", 5000, eToastPosition.TopCenter);
+                    var frmUpdater = new FrmUpdater(updater);
+                    frmUpdater.LoadConfig(config);
+                    frmUpdater.ShowDialog(this);
+                }
             }
-            else
+            catch
             {
-                return false;
-            }*/
+                // ignore error
+            }
         }
 
         void CharaSimLoader_WzFileFinding(object sender, FindWzEventArgs e)
@@ -1844,7 +1847,8 @@ namespace WzComparerR2
                         "size: " + png.Width + "*" + png.Height + "\r\n" +
                         "png format: " + png.Format + "(" + (int)png.Format + ")\r\n" +
                         "scale: " + png.Scale + "(x" + png.ActualScale + ")\r\n" +
-                        "pages: " + png.Pages + "(" + png.ActualPages + ")";
+                        "pages: " + png.Pages + "(" + png.ActualPages + ")\r\n" +
+                        "unknown1: " + png.Unknown1;
 
                     var sourceNode = selectedNode.GetLinkedSourceNode(PluginManager.FindWz);
                     if (sourceNode != selectedNode)
@@ -1868,7 +1872,8 @@ namespace WzComparerR2
                                 "size: " + png.Width + "*" + png.Height + "\r\n" +
                                 "png format: " + png.Format + "(" + (int)png.Format + ")\r\n" +
                                 "scale: " + png.Scale + "(x" + png.ActualScale + ")\r\n" +
-                                "pages: " + png.Pages + "(" + png.ActualPages + ")");
+                                "pages: " + png.Pages + "(" + png.ActualPages + ")\r\n" +
+                                "unknown1: " + png.Unknown1);
                         }
                     }
                     break;
@@ -3662,7 +3667,7 @@ namespace WzComparerR2
                     }
                     else if (Regex.IsMatch(skillNode.FullPathToFile, @"^Skill\d*\\\d+.img\\skill\\\d+$"))
                     {
-                        Skill skill = Skill.CreateFromNode(skillNode, PluginManager.FindWz, PluginManager.FindWz);
+                        Skill skill = Skill.CreateFromNode(skillNode, PluginManager.FindWz);
                         obj = skill;
                     }
                     break;
@@ -3677,21 +3682,28 @@ namespace WzComparerR2
                 case Wz_Type.Mob:
                     if ((image = selectedNode.GetValue<Wz_Image>()) == null || !image.TryExtract())
                         return;
-                    var mob = Mob.CreateFromNode(image.Node, PluginManager.FindWz, PluginManager.FindWz);
+                    var mob = Mob.CreateFromNode(image.Node, PluginManager.FindWz);
                     obj = mob;
+                    break;
+
+                case Wz_Type.Morph:
+                    if ((image = selectedNode.GetValue<Wz_Image>()) == null || !image.TryExtract())
+                        return;
+                    var morph = Morph.CreateFromNode(image.Node, PluginManager.FindWz);
+                    obj = morph;
                     break;
 
                 case Wz_Type.Npc:
                     if ((image = selectedNode.GetValue<Wz_Image>()) == null || !image.TryExtract())
                         return;
-                    var npc = Npc.CreateFromNode(image.Node, PluginManager.FindWz, PluginManager.FindWz, getSpineDefaultFunc: this.pictureBoxEx1.GetSpineDefault);
+                    var npc = Npc.CreateFromNode(image.Node, PluginManager.FindWz, getSpineDefaultFunc: this.pictureBoxEx1.GetSpineDefault);
                     obj = npc;
                     break;
 
                 case Wz_Type.Quest:
                     Quest quest = null;
                     if (!((image = selectedNode.GetValue<Wz_Image>()) == null || !image.TryExtract()))
-                        quest = Quest.CreateFromNode(image.Node, PluginManager.FindWz, PluginManager.FindWz);
+                        quest = Quest.CreateFromNode(image.Node, PluginManager.FindWz);
                     else if (quest == null)
                     {
                         Wz_Node questInfoNode = selectedNode;
@@ -3699,7 +3711,7 @@ namespace WzComparerR2
                         int questID = 0;
                         if (m.Success && Int32.TryParse(m.Result("$1"), out questID))
                         {
-                            quest = Quest.CreateFromNode(questInfoNode, PluginManager.FindWz, PluginManager.FindWz, fromInfoNode: questID);
+                            quest = Quest.CreateFromNode(questInfoNode, PluginManager.FindWz, fromInfoNode: questID);
                         }
                     }
                     obj = quest;
@@ -3719,7 +3731,7 @@ namespace WzComparerR2
                     {
                         if ((image = selectedNode.GetValue<Wz_Image>()) == null || !image.TryExtract())
                             return;
-                        Achievement achievement = Achievement.CreateFromNode(image.Node, PluginManager.FindWz, PluginManager.FindWz);
+                        Achievement achievement = Achievement.CreateFromNode(image.Node, PluginManager.FindWz);
                         obj = achievement;
                     }
                     break;
@@ -3742,6 +3754,9 @@ namespace WzComparerR2
                     switch (tooltipQuickView.TargetItem)
                     {
                         case Mob item:
+                            item.Dispose();
+                            break;
+                        case Morph item:
                             item.Dispose();
                             break;
                         case Npc item:
@@ -3813,6 +3828,11 @@ namespace WzComparerR2
                         sr_dict = stringLinker.StringMob;
                         node_id = mob.ID;
                         fileName = node_id + ".png";
+                        break;
+
+                    case Morph morph:
+                        node_id = morph.ID;
+                        fileName = "morph_" + node_id + ".png";
                         break;
 
                     case Npc npc:
@@ -3956,6 +3976,49 @@ namespace WzComparerR2
             if (buttonItemCharItem.Checked)
                 this.charaSimCtrl.UIItem.Refresh();
             this.charaSimCtrl.UIItem.Visible = buttonItemCharItem.Checked;
+        }
+
+        private void btnWorldArchiveBrowser_Click(object sender, EventArgs e)
+        {
+            if (PluginManager.FindWz(Wz_Type.Base) == null)
+            {
+                ToastNotification.Show(this, $"오류: Base.wz를 먼저 열어주세요.", null, 2000, eToastGlowColor.Red, eToastPosition.TopCenter);
+                return;
+            }
+            if (openedWz.Count > 1)
+            {
+                ToastNotification.Show(this, $"오류: Base.wz가 둘 이상 열려 있습니다.", null, 4000, eToastGlowColor.Red, eToastPosition.TopCenter);
+                return;
+            }
+            Wz_Node etcWaNode = PluginManager.FindWz(Wz_Type.Etc)?.FindNodeByPath("worldArchive.img");
+            Wz_Node waUiNode = PluginManager.FindWz(Wz_Type.UI)?.FindNodeByPath("UIworldArchive.img");
+            if (etcWaNode == null || waUiNode == null)
+            {
+                ToastNotification.Show(this, $"오류: 클라이언트에서 월드 아카이브 정보를 찾을 수 없습니다.", null, 2000, eToastGlowColor.Red, eToastPosition.TopCenter);
+                return;
+            }
+            foreach (Form form in Application.OpenForms)
+            {
+                if (form is FrmWorldArchiveBrowser && !form.IsDisposed)
+                {
+                    form.Show();
+                    form.BringToFront();
+                    return;
+                }
+            }
+            FrmWorldArchiveBrowser frmWorldArchiveBrowser = new FrmWorldArchiveBrowser(this);
+            frmWorldArchiveBrowser.SetStringLinker(this.stringLinker);
+            frmWorldArchiveBrowser.SetWzNodes(etcWaNode, waUiNode, PluginManager.FindWz(Wz_Type.Mob), PluginManager.FindWz(Wz_Type.Npc));
+            frmWorldArchiveBrowser.ResetState();
+            frmWorldArchiveBrowser.Show();
+        }
+
+        public void RedirectToNode(Wz_Node node)
+        {
+            if (OnSelectedWzNode(node))
+            {
+                tooltipQuickView.BringToFront();
+            }
         }
 
         private void buttonItemAddItem_Click(object sender, EventArgs e)
@@ -4330,7 +4393,6 @@ namespace WzComparerR2
                     comparer.OutputPng = chkOutputPng.Checked;
                     comparer.OutputAddedImg = chkOutputAddedImg.Checked;
                     comparer.OutputRemovedImg = chkOutputRemovedImg.Checked;
-                    comparer.EnableDarkMode = chkEnableDarkMode.Checked;
                     if (chkOutputAll.Checked)
                     {
                         comparer.OutputGearTooltip = true;
@@ -4356,6 +4418,18 @@ namespace WzComparerR2
                     comparer.HashPngFileName = chkHashPngFileName.Checked;
                     comparer.StateInfoChanged += new EventHandler(comparer_StateInfoChanged);
                     comparer.StateDetailChanged += new EventHandler(comparer_StateDetailChanged);
+                    comparer.ColorTable = new List<System.Drawing.Color>()
+                    {
+                        CustomCSSConfig.Default.BackgroundColor,
+                        CustomCSSConfig.Default.NormalTextColor,
+                        CustomCSSConfig.Default.ChangedBackgroundColor,
+                        CustomCSSConfig.Default.AddedBackgroundColor,
+                        CustomCSSConfig.Default.RemovedBackgroundColor,
+                        CustomCSSConfig.Default.ChangedTextColor,
+                        CustomCSSConfig.Default.AddedTextColor,
+                        CustomCSSConfig.Default.RemovedTextColor,
+                        CustomCSSConfig.Default.HyperlinkColor
+                    };
                     try
                     {
                         Wz_File fileNew = openedWz[0].wz_files[0];
@@ -4578,7 +4652,7 @@ namespace WzComparerR2
                                     }
                                     skillName = sr.Name;
                                     labelX2.Text = string.Format("내보내는 중: {0} - {1}", j.Text, skillName);
-                                    Skill skill = Skill.CreateFromNode(j, PluginManager.FindWz, PluginManager.FindWz);
+                                    Skill skill = Skill.CreateFromNode(j, PluginManager.FindWz);
                                     if (skill != null)
                                     {
                                         skill.Level = skill.MaxLevel;
@@ -4627,7 +4701,7 @@ namespace WzComparerR2
                                             }
                                             skillName = sr.Name;
                                             labelX2.Text = string.Format("내보내는 중: {0} - {1}", skillNode.Text, skillName);
-                                            Skill skill = Skill.CreateFromNode(skillNode, PluginManager.FindWz, PluginManager.FindWz);
+                                            Skill skill = Skill.CreateFromNode(skillNode, PluginManager.FindWz);
                                             if (skill != null)
                                             {
                                                 skill.Level = skill.MaxLevel;
@@ -4665,6 +4739,21 @@ namespace WzComparerR2
                     }
                     labelItemStatus.Text = "내보내기 완료: " + exportedFolder;
 
+                }
+            }
+        }
+
+        private void btnCustomCSS_Click(object sender, EventArgs e)
+        {
+            ConfigManager.Reload();
+            var Setting = CustomCSSConfig.Default;
+            using (FrmCustomCSS frm = new FrmCustomCSS())
+            {
+                frm.LoadConfig(Setting);
+                if (frm.ShowDialog() == DialogResult.OK)
+                {
+                    frm.SaveConfig(Setting);
+                    ConfigManager.Save();
                 }
             }
         }
@@ -4746,7 +4835,7 @@ namespace WzComparerR2
         private void buttonItemUpdate_Click(object sender, EventArgs e)
         {
             var frm = new FrmUpdater();
-            frm.Load(WcR2Config.Default);
+            frm.LoadConfig(WcR2Config.Default);
             frm.ShowDialog();
         }
 
@@ -4770,15 +4859,9 @@ namespace WzComparerR2
 
         private async void MainForm_Shown(object sender, EventArgs e)
         {
-            //Automatic Update Check
             if (WcR2Config.Default.AutoDetectUpdate)
             {
-                bool isUpdateRequired = await AutomaticCheckUpdate();
-                if (isUpdateRequired)
-                {
-                    var frm = new FrmUpdater();
-                    frm.ShowDialog();
-                }
+                await this.AutomaticCheckUpdate();
             }
         }
 

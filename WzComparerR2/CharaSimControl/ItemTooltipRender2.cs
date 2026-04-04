@@ -70,6 +70,7 @@ namespace WzComparerR2.CharaSimControl
         public TooltipRender LinkRecipeItemRender { get; set; }
         public TooltipRender LinkDamageSkinRender { get; set; }
         public TooltipRender FamiliarRender { get; set; }
+        public TooltipRender MorphRender { get; set; }
         public TooltipRender SetItemRender { get; set; }
         public TooltipRender CashPackageRender { get; set; }
         private AvatarCanvasManager avatar { get; set; }
@@ -120,7 +121,7 @@ namespace WzComparerR2.CharaSimControl
                             Wz_Node imgNode = node0.FindNodeByPath(imgName, true);
                             if (imgNode != null)
                             {
-                                Gear gear = Gear.CreateFromNode(imgNode, path => PluginManager.FindWz(path), this.SourceWzFile);
+                                Gear gear = Gear.CreateFromNode(imgNode, PluginManager.FindWz, this.SourceWzFile);
                                 if (gear != null)
                                 {
                                     gear.Props[GearPropType.timeLimited] = 0;
@@ -243,7 +244,8 @@ namespace WzComparerR2.CharaSimControl
 
             if (this.item.DamageSkinID != null && ShowDamageSkin)
             {
-                DamageSkin damageSkin = DamageSkin.CreateFromNode(PluginManager.FindWz($@"Etc\DamageSkin.img\{item.DamageSkinID}", this.SourceWzFile), PluginManager.FindWz) ?? DamageSkin.CreateFromNode(PluginManager.FindWz($@"Effect\DamageSkin.img\{item.DamageSkinID}", this.SourceWzFile), PluginManager.FindWz);
+                DamageSkin damageSkin = DamageSkin.CreateFromNode(PluginManager.FindWz($@"Etc\DamageSkin.img\{item.DamageSkinID}", this.SourceWzFile), PluginManager.FindWz, this.SourceWzFile) ??
+                    DamageSkin.CreateFromNode(PluginManager.FindWz($@"Effect\DamageSkin.img\{item.DamageSkinID}", this.SourceWzFile), PluginManager.FindWz, this.SourceWzFile);
                 if (damageSkin != null)
                 {
                     setItemBmp = RenderDamageSkin(damageSkin);
@@ -257,6 +259,16 @@ namespace WzComparerR2.CharaSimControl
                 {
                     setItemBmp = RenderFamiliar(familiar);
                     familiar.Dispose();
+                }
+            }
+
+            if (this.item.Specs.TryGetValue(ItemSpecType.morph, out long morphID) && morphID > 0)
+            {
+                Morph morph = Morph.CreateFromNode(PluginManager.FindWz($@"Morph\{morphID:D4}.img", this.SourceWzFile), PluginManager.FindWz, this.SourceWzFile);
+                if (morph != null)
+                {
+                    setItemBmp = RenderMorph(morph);
+                    morph.Dispose();
                 }
             }
 
@@ -859,7 +871,7 @@ namespace WzComparerR2.CharaSimControl
                 if (!string.IsNullOrEmpty(descLeftAlign))
                 {
                     picH += 12;
-                    GearGraphics.DrawString(g, descLeftAlign, GearGraphics.ItemDetailFont, 14, right, ref picH, 16);
+                    GearGraphics.DrawString(g, ReplaceDescTags(descLeftAlign), GearGraphics.ItemDetailFont, 14, right, ref picH, 16);
                 }
                 if (item.CoreSpecs.Count > 0)
                 {
@@ -1235,6 +1247,20 @@ namespace WzComparerR2.CharaSimControl
             return ret;
         }
 
+        private Bitmap RenderMorph(Morph morph)
+        {
+            TooltipRender renderer = this.MorphRender;
+            if (renderer == null)
+            {
+                MorphTooltipRenderer defaultRenderer = new MorphTooltipRenderer();
+                defaultRenderer.StringLinker = this.StringLinker;
+                defaultRenderer.ShowObjectID = this.ShowObjectID;
+                renderer = defaultRenderer;
+            }
+            renderer.TargetItem = morph;
+            return renderer.Render();
+        }
+
         private Bitmap RenderLinkRecipeInfo(Recipe recipe)
         {
             TooltipRender renderer = this.LinkRecipeInfoRender;
@@ -1442,6 +1468,28 @@ namespace WzComparerR2.CharaSimControl
 
                 text = text.Replace("#cosmetic_EULO#", name);
             }
+
+            text = Regex.Replace(text, @$"#(t)\s*(\d{{1,9}}).*?#", match => // id should be less than 1,000,000,000
+            {
+                string tag = match.Groups[1].Value;
+                if (!int.TryParse(match.Groups[2].Value, out int id)) id = -1;
+                StringResult sr;
+                var name = "";
+                switch (tag)
+                {
+                    case "t":
+                        StringLinker.StringItem.TryGetValue(id, out sr);
+                        if (sr == null)
+                        {
+                            StringLinker.StringEqp.TryGetValue(id, out sr);
+                        }
+                        name = sr?.Name ?? id.ToString();
+                        return $"{name}";
+
+                    default:
+                        return id.ToString();
+                }
+            });
 
             return text;
         }
