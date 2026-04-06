@@ -579,10 +579,11 @@ WzNode loadWzFolder(const std::string& folderPath, const std::vector<uint8_t>& c
     std::string name = dir.filename().string();
 
     // 1. 엔트리 파일 로드
-    std::cout << "[loadWzFolder] " << name << " 로드 시작\n";
+    fs::path entryWz = dir / (name + ".wz");
+    std::cout << "[loadWzFolder] " << name << " 로드 시작: " << entryWz.string() << "\n";
     WzNode root;
     try {
-        root = loadSingleWzTree((dir / (name + ".wz")).string(), cryptoKey);
+        root = loadSingleWzTree(entryWz.string(), cryptoKey);
         std::cout << "[loadWzFolder] " << name << " 로드 성공, 노드=" << root.children.size() << "\n";
     } catch (const std::exception& e) {
         std::cout << "[loadWzFolder] " << name << " 로드 실패: " << e.what() << "\n";
@@ -591,39 +592,95 @@ WzNode loadWzFolder(const std::string& folderPath, const std::vector<uint8_t>& c
         root.childCount = 0;
     }
 
-    // 2. LastWzIndex 확인 (ini 우선, 없으면 파일 스캔)
+    // 2. LastWzIndex 확인 (ini 우선, 없으면 디렉토리 스캔)
+    //    대소문자 구분 없이 Name_NNN.wz 패턴 파일을 수집
     int lastIdx = -1;
+
+    // 2a. INI 파일에서 LastWzIndex 읽기
     fs::path iniPath = dir / (name + ".ini");
     if (fs::exists(iniPath)) {
         std::ifstream ini(iniPath.string());
         std::string line;
         while (std::getline(ini, line)) {
+            // 줄 끝 CR 제거 (Windows INI)
+            if (!line.empty() && line.back() == '\r') line.pop_back();
             if (line.rfind("LastWzIndex|", 0) == 0) {
                 try { lastIdx = std::stoi(line.substr(12)); } catch (...) {}
                 break;
             }
         }
+        std::cout << "[loadWzFolder] " << name << " INI에서 lastIdx=" << lastIdx << "\n";
     }
-    if (lastIdx < 0) {
-        for (int i = 0; ; i++) {
-            char buf[8]; std::snprintf(buf, sizeof(buf), "_%03d", i);
-            if (!fs::exists(dir / (name + buf + ".wz"))) break;
-            lastIdx = i;
+
+    // 2b. INI 없으면 디렉토리 전체 스캔으로 Name_NNN.wz 찾기
+    //     (대소문자 무관, 순서 무관, 빈 번호도 허용)
+    if (lastIdx < 0 && fs::exists(dir) && fs::is_directory(dir)) {
+        // 이름 소문자 prefix: "skill_"
+        std::string lowerPrefix = name;
+        for (auto& c : lowerPrefix) c = (char)std::tolower((unsigned char)c);
+
+        std::vector<int> foundIndices;
+        try {
+            for (const auto& entry : fs::directory_iterator(dir)) {
+                if (!entry.is_regular_file()) continue;
+                std::string fname = entry.path().filename().string();
+                // 소문자로 비교
+                std::string lname = fname;
+                for (auto& c : lname) c = (char)std::tolower((unsigned char)c);
+
+                // "name_NNN.wz" 패턴 확인
+                // prefix "name_" + 3자리 숫자 + ".wz" = name.size()+7
+                if (lname.size() == lowerPrefix.size() + 7 &&
+                    lname.substr(0, lowerPrefix.size()) == lowerPrefix &&
+                    lname[lowerPrefix.size()] == '_' &&
+                    lname.substr(lname.size() - 3) == ".wz") {
+                    std::string idxStr = lname.substr(lowerPrefix.size() + 1, 3);
+                    bool allDigit = true;
+                    for (char c : idxStr) if (!std::isdigit((unsigned char)c)) { allDigit = false; break; }
+                    if (allDigit) {
+                        int idx = std::stoi(idxStr);
+                        foundIndices.push_back(idx);
+                        if (idx > lastIdx) lastIdx = idx;
+                    }
+                }
+            }
+        } catch (...) {}
+
+        if (!foundIndices.empty()) {
+            std::cout << "[loadWzFolder] " << name << " 디렉토리 스캔: _NNN.wz 파일 "
+                      << foundIndices.size() << "개 발견, lastIdx=" << lastIdx << "\n";
+        } else {
+            std::cout << "[loadWzFolder] " << name << " _NNN.wz 파일 없음\n";
         }
     }
-    std::cout << "[loadWzFolder] " << name << " lastIdx=" << lastIdx << "\n";
+
     std::cout.flush();
 
-    // 3. 분할 파일 merge: Character_000.wz …
+    // 3. 분할 파일 merge: Character_000.wz … (번호 순서대로)
     for (int i = 0; i <= lastIdx; i++) {
-        char buf[8]; std::snprintf(buf, sizeof(buf), "_%03d", i);
+        char buf[16]; std::snprintf(buf, sizeof(buf), "_%03d", i);
         fs::path extraWz = dir / (name + buf + ".wz");
-        if (!fs::exists(extraWz)) continue;
-        WzNode extra = loadSingleWzTree(extraWz.string(), cryptoKey);
-        for (auto& child : extra.children)
-            root.children.push_back(std::move(child));
+        if (!fs::exists(extraWz)) {
+            // 대소문자 다른 경우 체크
+            std::string lname_lower = name;
+            for (auto& c : lname_lower) c = (char)std::tolower((unsigned char)c);
+            fs::path extraWzLower = dir / (lname_lower + buf + ".wz");
+            if (fs::exists(extraWzLower)) extraWz = extraWzLower;
+            else continue;
+        }
+        std::cout << "[loadWzFolder] merge: " << extraWz.filename().string() << "\n";
+        try {
+            WzNode extra = loadSingleWzTree(extraWz.string(), cryptoKey);
+            std::cout << "[loadWzFolder] merge 완료: " << extra.children.size() << " 노드\n";
+            for (auto& child : extra.children)
+                root.children.push_back(std::move(child));
+        } catch (const std::exception& e) {
+            std::cout << "[loadWzFolder] merge 실패 " << extraWz.filename().string()
+                      << ": " << e.what() << "\n";
+        }
     }
     root.childCount = (int)root.children.size();
+    std::cout << "[loadWzFolder] " << name << " 최종 노드=" << root.childCount << "\n";
     return root;
 }
 
@@ -684,7 +741,7 @@ int main(int argc, char* argv[]) {
     int maxDepth = 3;
     std::string outputPath;
 
-    // ── CLI 인수 파싱: -o <출력파일>, -d <depth> ──
+    // ── CLI 인수 파싱: [wz경로] -o <출력파일> -d <depth> ──
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
         if ((arg == "-o" || arg == "--output") && i + 1 < argc) {
@@ -695,6 +752,8 @@ int main(int argc, char* argv[]) {
             maxDepth = std::stoi(argv[++i]);
         } else if (arg.rfind("-d", 0) == 0 && arg.size() > 2) {
             maxDepth = std::stoi(arg.substr(2)); // -d<N> 형태
+        } else if (arg[0] != '-') {
+            wzPath = arg; // 첫 번째 비플래그 인수 = WZ 파일 경로
         }
     }
 
@@ -824,13 +883,13 @@ int main(int argc, char* argv[]) {
             }
             if (lastIdx < 0) {
                 for (int i = 0; ; i++) {
-                    char buf[8]; std::snprintf(buf, sizeof(buf), "_%03d", i);
+                    char buf[16]; std::snprintf(buf, sizeof(buf), "_%03d", i);
                     if (!fs::exists(baseDir / (stem + buf + ".wz"))) break;
                     lastIdx = i;
                 }
             }
             for (int i = 0; i <= lastIdx; i++) {
-                char buf[8]; std::snprintf(buf, sizeof(buf), "_%03d", i);
+                char buf[16]; std::snprintf(buf, sizeof(buf), "_%03d", i);
                 fs::path extraPath = baseDir / (stem + buf + ".wz");
                 if (!fs::exists(extraPath)) continue;
                 try {
