@@ -489,6 +489,14 @@ WzNode readDirTreePkg2(WzReader& reader, const std::vector<uint8_t>& cryptoKey,
             break;
         } else {
             // 알 수 없는 바이트 → graceful 종료 (C# 은 throw, 우리는 조용히 중단)
+            // 디버그: 어떤 바이트에서 멈췄는지 출력
+            if (!debugLabel.empty()) {
+                std::streampos curPos = reader.tell() - std::streamoff(1);
+                std::cout << "[PKG2 WARN] " << debugLabel
+                          << " 예상치 못한 nodeType=0x" << std::hex << (int)nodeType << std::dec
+                          << " @ offset " << (int64_t)curPos
+                          << " (entries=" << entries.size() << ")\n";
+            }
             reader.seek(reader.tell() - std::streamoff(1));
             break;
         }
@@ -650,7 +658,24 @@ WzNode loadWzFolder(const std::string& folderPath, const std::vector<uint8_t>& c
             std::cout << "[loadWzFolder] " << name << " 디렉토리 스캔: _NNN.wz 파일 "
                       << foundIndices.size() << "개 발견, lastIdx=" << lastIdx << "\n";
         } else {
-            std::cout << "[loadWzFolder] " << name << " _NNN.wz 파일 없음\n";
+            // 파일이 없을 때: 해당 디렉토리 내 모든 .wz 파일 나열 (진단용)
+            std::cout << "[loadWzFolder] " << name << " _NNN.wz 파일 없음. 디렉토리 내 .wz 목록:\n";
+            try {
+                bool anyWz = false;
+                for (const auto& entry : fs::directory_iterator(dir)) {
+                    if (!entry.is_regular_file()) continue;
+                    std::string fname = entry.path().filename().string();
+                    std::string lname2 = fname;
+                    for (auto& c : lname2) c = (char)std::tolower((unsigned char)c);
+                    if (lname2.size() >= 3 && lname2.substr(lname2.size() - 3) == ".wz") {
+                        std::cout << "  " << fname << "\n";
+                        anyWz = true;
+                    }
+                }
+                if (!anyWz) std::cout << "  (없음)\n";
+            } catch (...) {
+                std::cout << "  (디렉토리 읽기 실패)\n";
+            }
         }
     }
 
