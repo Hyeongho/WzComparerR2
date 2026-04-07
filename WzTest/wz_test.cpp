@@ -203,6 +203,38 @@ public:
         }
     }
 
+    // KMST1198+ PKG2 첫 번째 디렉토리 엔트리 이름 읽기
+    // ReadPkg2DirString 동일 구현 (WzBinaryReader.cs):
+    //   sizeByte < 0: (-sizeByte)*2 바이트를 UTF-16LE로 읽음, AES XOR만 적용 (rolling mask 없음)
+    std::string readPkg2DirString(const std::vector<uint8_t>& cryptoKey) {
+        int8_t sizeByte = readS8();
+        if (sizeByte == 0) return "";
+        if (sizeByte > 0) throw std::runtime_error("readPkg2DirString: unexpected positive sizeByte");
+        int size    = (int)(-sizeByte);
+        int byteSize = size * 2;
+        std::vector<uint8_t> rawBuf(byteSize);
+        file.read((char*)rawBuf.data(), byteSize);
+        // AES keystream XOR (rolling mask 없음 — ReadString 과의 핵심 차이)
+        for (int i = 0; i < byteSize && i < (int)cryptoKey.size(); i++)
+            rawBuf[i] ^= cryptoKey[i];
+        // UTF-16LE → UTF-8 변환
+        std::string result;
+        for (int i = 0; i < size; i++) {
+            uint16_t c = (uint16_t)rawBuf[i * 2] | ((uint16_t)rawBuf[i * 2 + 1] << 8);
+            if (c < 0x80) {
+                result += (char)c;
+            } else if (c < 0x800) {
+                result += (char)(0xC0 | (c >> 6));
+                result += (char)(0x80 | (c & 0x3F));
+            } else {
+                result += (char)(0xE0 | (c >> 12));
+                result += (char)(0x80 | ((c >> 6) & 0x3F));
+                result += (char)(0x80 | (c & 0x3F));
+            }
+        }
+        return result;
+    }
+
     // 지정 오프셋에서 문자열 읽기 (현재 위치 복원)
     // offset: DataStartPosition 기준 상대 오프셋
     std::string readStringAt(int64_t absoluteFileOffset,
@@ -472,12 +504,41 @@ WzNode readDirTreePkg2(WzReader& reader, const std::vector<uint8_t>& cryptoKey,
     // → KMST1197: encryptedEntryCount 가 5바이트(0x80 시작), terminator 는 0x80
     bool entryCountIs1Byte = (encryptedEntryCount >= -127 && encryptedEntryCount <= 127);
 
+    // KMST1196 vs KMST1198+ 자동 감지 플래그
+    // 첫 번째 엔트리에서 readPkg2DirString 시도 후 유효하면 KMST1198+ 확정
+    bool isKmst1198 = false;
+
     // ── C# 방식 terminator-based 루프 ──
     while (true) {
         uint8_t nodeType = reader.readU8();
 
         if (nodeType == 0x03 || nodeType == 0x04) {
-            std::string name = reader.readString(cryptoKey);
+            std::string name;
+
+            if (entries.empty()) {
+                // 첫 번째 엔트리: KMST1196 vs KMST1198+ 자동 감지
+                // KMST1198+: readPkg2DirString (sizeByte*2 바이트, UTF-16LE, rolling mask 없음)
+                // KMST1196:  readString        (sizeByte   바이트, ASCII,   rolling mask 있음)
+                auto beforeName = reader.tell();
+                bool usedPkg2Dir = false;
+                try {
+                    std::string candidate = reader.readPkg2DirString(cryptoKey);
+                    if (isLegalNodeName(candidate)) {
+                        name = candidate;
+                        isKmst1198 = true;
+                        usedPkg2Dir = true;
+                    }
+                } catch (...) {}
+
+                if (!usedPkg2Dir) {
+                    reader.seek(beforeName);
+                    name = reader.readString(cryptoKey);
+                }
+            } else {
+                // 두 번째 엔트리부터: KMST1198+도 readString 사용 (C# 동일)
+                name = reader.readString(cryptoKey);
+            }
+
             int32_t size = reader.readCompressedInt32();
             int32_t cs32 = reader.readCompressedInt32();
             entries.push_back({ nodeType, name, size, cs32 });
@@ -488,8 +549,7 @@ WzNode readDirTreePkg2(WzReader& reader, const std::vector<uint8_t>& cryptoKey,
             reader.seek(reader.tell() - std::streamoff(1));
             break;
         } else {
-            // 알 수 없는 바이트 → graceful 종료 (C# 은 throw, 우리는 조용히 중단)
-            // 디버그: 어떤 바이트에서 멈췄는지 출력
+            // 알 수 없는 바이트 → graceful 종료
             if (!debugLabel.empty()) {
                 std::streampos curPos = reader.tell() - std::streamoff(1);
                 std::cout << "[PKG2 WARN] " << debugLabel
@@ -514,6 +574,7 @@ WzNode readDirTreePkg2(WzReader& reader, const std::vector<uint8_t>& cryptoKey,
             else dirCount++;
         }
         std::cout << "[PKG2 DBG] " << debugLabel
+                  << (isKmst1198 ? " [KMST1198+]" : " [KMST1196]")
                   << " enc=" << encryptedEntryCount
                   << (entryCountIs1Byte ? "[1B]" : "[5B]")
                   << " entries=" << entries.size()
