@@ -50,6 +50,16 @@ static const uint8_t WZ_IV_GMS[4] = { 0x4D, 0x23, 0xC7, 0x2B };
 static const char* WZ_SIG_PKG1 = "PKG1";
 static const char* WZ_SIG_PKG2 = "PKG2";
 
+// KMST1198 Pkg2DirStringKey: Pkg2DirStringKey(0xDEADBEEF) — 8바이트 반복 XOR
+// C# Wz_Crypto.cs::Pkg2DirStringKey 참조: AES 키스트림과 무관, Base.wz 암호화 타입 독립적
+// keys[0..1] = LE(ushort)(0xDEADBEEF >>  0) = 0xBEEF → EF BE
+// keys[2..3] = LE(ushort)(0xDEADBEEF >>  8) = 0xADBE → BE AD
+// keys[4..5] = LE(ushort)(0xDEADBEEF >> 16) = 0xDEAD → AD DE
+// keys[6..7] = LE(ushort)(0xDEADBEEF >> 24) = 0x00DE → DE 00
+static const uint8_t PKG2_DIR_KEY_1198[8] = {
+    0xEF, 0xBE, 0xBE, 0xAD, 0xAD, 0xDE, 0xDE, 0x00
+};
+
 enum class CryptoType { BMS, KMS, GMS, UNKNOWN };
 
 // ================================================================
@@ -205,8 +215,9 @@ public:
 
     // KMST1198+ PKG2 첫 번째 디렉토리 엔트리 이름 읽기
     // ReadPkg2DirString 동일 구현 (WzBinaryReader.cs):
-    //   sizeByte < 0: (-sizeByte)*2 바이트를 UTF-16LE로 읽음, AES XOR만 적용 (rolling mask 없음)
-    std::string readPkg2DirString(const std::vector<uint8_t>& cryptoKey) {
+    //   sizeByte < 0: (-sizeByte)*2 바이트를 UTF-16LE로 읽음
+    //   복호화: PKG2_DIR_KEY_1198(8바이트 반복 XOR) — AES 키스트림 아님, rolling mask 없음
+    std::string readPkg2DirString() {
         int8_t sizeByte = readS8();
         if (sizeByte == 0) return "";
         if (sizeByte > 0) throw std::runtime_error("readPkg2DirString: unexpected positive sizeByte");
@@ -214,9 +225,9 @@ public:
         int byteSize = size * 2;
         std::vector<uint8_t> rawBuf(byteSize);
         file.read((char*)rawBuf.data(), byteSize);
-        // AES keystream XOR (rolling mask 없음 — ReadString 과의 핵심 차이)
-        for (int i = 0; i < byteSize && i < (int)cryptoKey.size(); i++)
-            rawBuf[i] ^= cryptoKey[i];
+        // KMST1198 Pkg2DirStringKey(0xDEADBEEF): 8바이트 반복 XOR (AES와 무관)
+        for (int i = 0; i < byteSize; i++)
+            rawBuf[i] ^= PKG2_DIR_KEY_1198[i % 8];
         // UTF-16LE → UTF-8 변환
         std::string result;
         for (int i = 0; i < size; i++) {
@@ -522,7 +533,7 @@ WzNode readDirTreePkg2(WzReader& reader, const std::vector<uint8_t>& cryptoKey,
                 auto beforeName = reader.tell();
                 bool usedPkg2Dir = false;
                 try {
-                    std::string candidate = reader.readPkg2DirString(cryptoKey);
+                    std::string candidate = reader.readPkg2DirString();
                     if (isLegalNodeName(candidate)) {
                         name = candidate;
                         isKmst1198 = true;
