@@ -18,6 +18,7 @@
 #include <iomanip>
 #include <string>
 #include <vector>
+#include <unordered_map>
 #include <cstdint>
 #include <cstring>
 #include <stdexcept>
@@ -213,11 +214,13 @@ public:
         }
     }
 
-    // KMST1198+ PKG2 첫 번째 디렉토리 엔트리 이름 읽기
+    // KMST1198/1199 PKG2 첫 번째 디렉토리 엔트리 이름 읽기
     // ReadPkg2DirString 동일 구현 (WzBinaryReader.cs):
     //   sizeByte < 0: (-sizeByte)*2 바이트를 UTF-16LE로 읽음
-    //   복호화: PKG2_DIR_KEY_1198(8바이트 반복 XOR) — AES 키스트림 아님, rolling mask 없음
-    std::string readPkg2DirString() {
+    //   복호화: key8(8바이트 반복 XOR) — AES 키스트림 아님, rolling mask 없음
+    //   key8 기본값: PKG2_DIR_KEY_1198 (KMST1198 고정 키)
+    //   KMST1199: computePkg2DirStringKeyV2()로 파생한 per-file 키 전달
+    std::string readPkg2DirString(const uint8_t* key8 = PKG2_DIR_KEY_1198) {
         int8_t sizeByte = readS8();
         if (sizeByte == 0) return "";
         if (sizeByte > 0) throw std::runtime_error("readPkg2DirString: unexpected positive sizeByte");
@@ -225,9 +228,9 @@ public:
         int byteSize = size * 2;
         std::vector<uint8_t> rawBuf(byteSize);
         file.read((char*)rawBuf.data(), byteSize);
-        // KMST1198 Pkg2DirStringKey(0xDEADBEEF): 8바이트 반복 XOR (AES와 무관)
+        // 8바이트 반복 XOR (AES와 무관)
         for (int i = 0; i < byteSize; i++)
-            rawBuf[i] ^= PKG2_DIR_KEY_1198[i % 8];
+            rawBuf[i] ^= key8[i % 8];
         // UTF-16LE → UTF-8 변환
         std::string result;
         for (int i = 0; i < size; i++) {
@@ -475,10 +478,61 @@ static inline uint32_t rol32(uint32_t x, int n) {
     return (x << n) | (x >> (32 - n));
 }
 
+// C# MathHelper.Mix() 동일 — KMST1199 키 파생 및 V4 hashVersion 브루트포스용
+static inline uint32_t mix32(uint32_t v) {
+    v ^= v >> 16;
+    v *= 0x7FEB352Du;
+    v ^= v >> 15;
+    v *= 0x846CA68Bu;
+    v ^= v >> 16;
+    return v;
+}
+
 // KMST1196 엔트리 카운트 복호화
 // enc ^ ((hash1 << 24) + (0x7F4A7C15 * hashVersion))
 static inline int32_t decryptPkg2EntryCount(int32_t enc, uint32_t hash1, uint32_t hashVersion) {
     return (int32_t)((uint32_t)enc ^ ((hash1 << 24) + (uint32_t)(0x7F4A7C15u * hashVersion)));
+}
+
+// KMST1199 hashVersion 브루트포스 (C# Pkg2HashVersionCalcV4.Verify 동일)
+// 반환: UINT32_MAX = 못 찾음
+static uint32_t bruteForceHashVersionV4(uint32_t hash1, uint32_t hash2) {
+    uint32_t hash1Low4 = hash1 & 0xF;
+    uint32_t target = ~hash2;
+    for (uint64_t hv = 0; hv <= 0xFFFFFFFFull; hv++) {
+        uint32_t hashVersion = (uint32_t)hv;
+        uint32_t preHash = hash1 ^ hashVersion;
+        uint32_t mixedHash = mix32(preHash ^ 0x6D4C3B2Au) ^ 0x91E10DA5u;
+        uint32_t lt = rol32(
+            hash1 ^ ((uint16_t)mixedHash + hashVersion + 0x1A2B3C4Du),
+            (int)(((mixedHash ^ hashVersion) & 0xF) + hash1Low4));
+        if ((lt ^ (preHash + mixedHash)) == target)
+            return hashVersion;
+    }
+    return UINT32_MAX;
+}
+
+// KMST1199 8바이트 키 파생 (C# Pkg2DirStringKeyV2.ConvertKey + Pkg2DirStringKey 동일)
+static void computePkg2DirStringKeyV2(uint32_t hash1, uint32_t hashVersion, uint8_t key[8]) {
+    uint32_t baseHash = hash1 ^ hashVersion ^ 0x6D4C3B2Au;
+    uint32_t baseKey  = mix32(mix32(baseHash) ^ 0x4F4CB34Au);
+    // Pkg2DirStringKey(baseKey): 4개 ushort를 LE로 배치
+    for (int i = 0; i < 4; i++) {
+        uint16_t val   = (uint16_t)(baseKey >> (8 * i));
+        key[i * 2]     = (uint8_t)(val & 0xFF);
+        key[i * 2 + 1] = (uint8_t)(val >> 8);
+    }
+}
+
+// (hash1, hash2) 쌍별 hashVersion 캐시 — 동일 게임 버전 내 반복 계산 방지
+static std::unordered_map<uint64_t, uint32_t> g_hashVersionV4Cache;
+static uint32_t getHashVersionV4Cached(uint32_t hash1, uint32_t hash2) {
+    uint64_t cacheKey = ((uint64_t)hash1 << 32) | hash2;
+    auto it = g_hashVersionV4Cache.find(cacheKey);
+    if (it != g_hashVersionV4Cache.end()) return it->second;
+    uint32_t hv = bruteForceHashVersionV4(hash1, hash2);
+    g_hashVersionV4Cache[cacheKey] = hv;
+    return hv;
 }
 
 // ================================================================
@@ -527,13 +581,16 @@ WzNode readDirTreePkg2(WzReader& reader, const std::vector<uint8_t>& cryptoKey,
             std::string name;
 
             if (entries.empty()) {
-                // 첫 번째 엔트리: KMST1196 vs KMST1198+ 자동 감지
-                // KMST1198+: readPkg2DirString (sizeByte*2 바이트, UTF-16LE, rolling mask 없음)
-                // KMST1196:  readString        (sizeByte   바이트, ASCII,   rolling mask 있음)
+                // 첫 번째 엔트리: KMST1196 vs KMST1198 vs KMST1199 자동 감지
+                // KMST1198: 고정 8바이트 키(0xDEADBEEF), UTF-16LE
+                // KMST1199: per-file 8바이트 키(V4 브루트포스), UTF-16LE
+                // KMST1196: readString (ASCII + rolling mask)
                 auto beforeName = reader.tell();
                 bool usedPkg2Dir = false;
+
+                // 1단계: KMST1198 고정 키 시도
                 try {
-                    std::string candidate = reader.readPkg2DirString();
+                    std::string candidate = reader.readPkg2DirString(PKG2_DIR_KEY_1198);
                     if (isLegalNodeName(candidate)) {
                         name = candidate;
                         isKmst1198 = true;
@@ -541,6 +598,25 @@ WzNode readDirTreePkg2(WzReader& reader, const std::vector<uint8_t>& cryptoKey,
                     }
                 } catch (...) {}
 
+                // 2단계: KMST1199 per-file 키 시도 (V4 브루트포스)
+                if (!usedPkg2Dir) {
+                    reader.seek(beforeName);
+                    uint32_t hv = getHashVersionV4Cached(hash1, hash2);
+                    if (hv != UINT32_MAX) {
+                        uint8_t key1199[8];
+                        computePkg2DirStringKeyV2(hash1, hv, key1199);
+                        try {
+                            std::string candidate = reader.readPkg2DirString(key1199);
+                            if (isLegalNodeName(candidate)) {
+                                name = candidate;
+                                isKmst1198 = true;
+                                usedPkg2Dir = true;
+                            }
+                        } catch (...) {}
+                    }
+                }
+
+                // 3단계: KMST1196 폴백
                 if (!usedPkg2Dir) {
                     reader.seek(beforeName);
                     name = reader.readString(cryptoKey);
