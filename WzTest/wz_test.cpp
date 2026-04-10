@@ -494,6 +494,14 @@ static inline int32_t decryptPkg2EntryCount(int32_t enc, uint32_t hash1, uint32_
     return (int32_t)((uint32_t)enc ^ ((hash1 << 24) + (uint32_t)(0x7F4A7C15u * hashVersion)));
 }
 
+// KMST1199 (V3) 엔트리 카운트 복호화
+// C# Pkg2OffsetCalcV3.DecryptEntryCount 동일
+static inline int32_t decryptPkg2EntryCountV3(int32_t enc, uint32_t hash1,
+                                               uint32_t hashVersion, uint32_t mixedHash) {
+    return (int32_t)((uint32_t)enc ^
+        ((hash1 << 16) + (mixedHash & 0x7FFFFFFFu) - (0x21524111u * hashVersion)));
+}
+
 // KMST1199 hashVersion 브루트포스 (C# Pkg2HashVersionCalcV4.Verify 동일)
 // 반환: UINT32_MAX = 못 찾음
 static uint32_t bruteForceHashVersionV4(uint32_t hash1, uint32_t hash2) {
@@ -543,9 +551,9 @@ static uint32_t getHashVersionV4Cached(uint32_t hash1, uint32_t hash2) {
 //   PKG2 엔트리: [nodeType][name][size][cs32]  ← hashOffset 없음!
 //               hashOffset 은 엔트리 목록 뒤에 별도 섹션으로 모아서 읽음
 //
-// terminator 조건 (C# ReadDirTreePkg2 동일):
-//   nodeType == 0x80  →  KMST1197: encryptedEntryCount 가 5바이트(0x80 시작)
-//   nodeType == encryptedEntryCount (1바이트 범위)  →  KMST1196
+// 루프 방식: 카운트 기반 (C# ReadDirTreePkg2 동일)
+//   encryptedEntryCount → DecryptEntryCount(버전별) → 실제 entryCount
+//   for (i = 0; i < entryCount; i++) { ... }
 // match 조건: encryptedOffsetCount == encryptedEntryCount (raw equality)
 // ================================================================
 WzNode readDirTreePkg2(WzReader& reader, const std::vector<uint8_t>& cryptoKey,
@@ -555,7 +563,80 @@ WzNode readDirTreePkg2(WzReader& reader, const std::vector<uint8_t>& cryptoKey,
 
     int32_t encryptedEntryCount = reader.readCompressedInt32();
 
-    // 엔트리 임시 저장 (hashOffset 은 뒤에서 읽음)
+    // ── PHASE 1: 버전 감지 (첫 번째 엔트리 peek → seek 복원) ──
+    // 엔트리 카운트 복호화에 사용할 버전을 미리 결정해야 올바른 루프 횟수를 얻을 수 있음
+    enum class Pkg2Ver { KMST1196, KMST1198, KMST1199 };
+    Pkg2Ver detectedVer = Pkg2Ver::KMST1196;
+    uint32_t calcHashVersion = 0;
+    uint32_t calcMixedHash   = 0;
+
+    // V1 hashVersion: O(1) 계산 (KMST1196, C# Pkg2HashVersionCalcV1 동일)
+    uint32_t hashVersionV1 = rol32(hash1, 7) ^ hash2;
+
+    // V4 brute-force (KMST1199) — 캐시 사용, 동일 (hash1,hash2)에서 반복 계산 없음
+    uint32_t hashVersionV4 = getHashVersionV4Cached(hash1, hash2);
+
+    {
+        auto probePos = reader.tell();
+        bool versionFound = false;
+        try {
+            uint8_t firstType = reader.readU8();
+            if (firstType == 0x03 || firstType == 0x04) {
+                auto namePos = reader.tell();
+
+                // 1단계: KMST1198 고정 키 시도
+                try {
+                    std::string c = reader.readPkg2DirString(PKG2_DIR_KEY_1198);
+                    if (isLegalNodeName(c)) {
+                        detectedVer  = Pkg2Ver::KMST1198;
+                        versionFound = true;
+                    }
+                } catch (...) {}
+
+                // 2단계: KMST1199 per-file 키 시도
+                if (!versionFound && hashVersionV4 != UINT32_MAX) {
+                    reader.seek(namePos);
+                    uint8_t key1199[8];
+                    computePkg2DirStringKeyV2(hash1, hashVersionV4, key1199);
+                    try {
+                        std::string c = reader.readPkg2DirString(key1199);
+                        if (isLegalNodeName(c)) {
+                            detectedVer     = Pkg2Ver::KMST1199;
+                            calcHashVersion = hashVersionV4;
+                            uint32_t preHash = hash1 ^ hashVersionV4;
+                            calcMixedHash   = mix32(preHash ^ 0x6D4C3B2Au) ^ 0x91E10DA5u;
+                            versionFound    = true;
+                        }
+                    } catch (...) {}
+                }
+            }
+        } catch (...) {}
+
+        if (!versionFound) {
+            // KMST1196 폴백
+            detectedVer     = Pkg2Ver::KMST1196;
+            calcHashVersion = hashVersionV1;
+        }
+        reader.seek(probePos);  // 위치 복원 — 메인 루프는 probePos부터 재읽음
+    }
+
+    // ── PHASE 2: 엔트리 카운트 복호화 ──
+    int32_t entryCount   = 0;
+    bool    useCountLoop = false;
+
+    if (detectedVer == Pkg2Ver::KMST1199) {
+        // V3: enc ^ ((hash1<<16) + (mixedHash&0x7FFFFFFF) - (0x21524111*hashVersion))
+        entryCount   = decryptPkg2EntryCountV3(encryptedEntryCount, hash1,
+                                                calcHashVersion, calcMixedHash);
+        useCountLoop = (entryCount > 0 && entryCount < 100000);
+    } else if (detectedVer == Pkg2Ver::KMST1196) {
+        // V1: enc ^ ((hash1<<24) + (0x7F4A7C15*hashVersion))
+        entryCount   = decryptPkg2EntryCount(encryptedEntryCount, hash1, calcHashVersion);
+        useCountLoop = (entryCount > 0 && entryCount < 100000);
+    }
+    // KMST1198: backtrack solver 없이 hashVersion을 구할 수 없어 터미네이터 폴백
+
+    // 엔트리 임시 저장
     struct Pkg2Entry {
         uint8_t     nodeType;
         std::string name;
@@ -563,89 +644,88 @@ WzNode readDirTreePkg2(WzReader& reader, const std::vector<uint8_t>& cryptoKey,
         int32_t     checksum;
     };
     std::vector<Pkg2Entry> entries;
+    bool isKmst1198 = (detectedVer != Pkg2Ver::KMST1196);
 
-    // encryptedEntryCount 가 1바이트 CompressedInt32 범위인지 판단
-    // → KMST1196: encryptedOffsetCount 의 첫 바이트 == encryptedEntryCount 로 terminator
-    // → KMST1197: encryptedEntryCount 가 5바이트(0x80 시작), terminator 는 0x80
-    bool entryCountIs1Byte = (encryptedEntryCount >= -127 && encryptedEntryCount <= 127);
-
-    // KMST1196 vs KMST1198+ 자동 감지 플래그
-    // 첫 번째 엔트리에서 readPkg2DirString 시도 후 유효하면 KMST1198+ 확정
-    bool isKmst1198 = false;
-
-    // ── C# 방식 terminator-based 루프 ──
-    while (true) {
-        uint8_t nodeType = reader.readU8();
-
-        if (nodeType == 0x03 || nodeType == 0x04) {
-            std::string name;
-
-            if (entries.empty()) {
-                // 첫 번째 엔트리: KMST1196 vs KMST1198 vs KMST1199 자동 감지
-                // KMST1198: 고정 8바이트 키(0xDEADBEEF), UTF-16LE
-                // KMST1199: per-file 8바이트 키(V4 브루트포스), UTF-16LE
-                // KMST1196: readString (ASCII + rolling mask)
-                auto beforeName = reader.tell();
-                bool usedPkg2Dir = false;
-
-                // 1단계: KMST1198 고정 키 시도
-                try {
-                    std::string candidate = reader.readPkg2DirString(PKG2_DIR_KEY_1198);
-                    if (isLegalNodeName(candidate)) {
-                        name = candidate;
-                        isKmst1198 = true;
-                        usedPkg2Dir = true;
-                    }
-                } catch (...) {}
-
-                // 2단계: KMST1199 per-file 키 시도 (V4 브루트포스)
-                if (!usedPkg2Dir) {
-                    reader.seek(beforeName);
-                    uint32_t hv = getHashVersionV4Cached(hash1, hash2);
-                    if (hv != UINT32_MAX) {
-                        uint8_t key1199[8];
-                        computePkg2DirStringKeyV2(hash1, hv, key1199);
-                        try {
-                            std::string candidate = reader.readPkg2DirString(key1199);
-                            if (isLegalNodeName(candidate)) {
-                                name = candidate;
-                                isKmst1198 = true;
-                                usedPkg2Dir = true;
-                            }
-                        } catch (...) {}
-                    }
+    // ── PHASE 3: 엔트리 읽기 루프 ──
+    if (useCountLoop) {
+        // ── 카운트 기반 루프 (KMST1196 / KMST1199) ──
+        for (int32_t i = 0; i < entryCount; i++) {
+            uint8_t nodeType = reader.readU8();
+            if (nodeType != 0x03 && nodeType != 0x04) {
+                if (!debugLabel.empty()) {
+                    std::cout << "[PKG2 WARN] " << debugLabel
+                              << " idx=" << i << " 예상치 못한 nodeType=0x"
+                              << std::hex << (int)nodeType << std::dec
+                              << " @ offset " << (int64_t)(reader.tell() - std::streamoff(1))
+                              << "\n";
+                    std::cout.flush();
                 }
+                reader.seek(reader.tell() - std::streamoff(1));
+                break;
+            }
 
-                // 3단계: KMST1196 폴백
-                if (!usedPkg2Dir) {
-                    reader.seek(beforeName);
-                    name = reader.readString(cryptoKey);
+            std::string name;
+            if (i == 0) {
+                // 첫 번째 엔트리: 버전별 특수 디코딩
+                if (detectedVer == Pkg2Ver::KMST1198) {
+                    name = reader.readPkg2DirString(PKG2_DIR_KEY_1198);
+                } else if (detectedVer == Pkg2Ver::KMST1199) {
+                    uint8_t key1199[8];
+                    computePkg2DirStringKeyV2(hash1, calcHashVersion, key1199);
+                    name = reader.readPkg2DirString(key1199);
+                } else {
+                    name = reader.readString(cryptoKey);  // KMST1196
                 }
             } else {
-                // 두 번째 엔트리부터: KMST1198+도 readString 사용 (C# 동일)
                 name = reader.readString(cryptoKey);
             }
 
             int32_t size = reader.readCompressedInt32();
             int32_t cs32 = reader.readCompressedInt32();
             entries.push_back({ nodeType, name, size, cs32 });
-        } else if (nodeType == 0x80 ||
-                   (entryCountIs1Byte &&
-                    nodeType == (uint8_t)(int8_t)encryptedEntryCount)) {
-            // terminator: encryptedOffsetCount 의 첫 바이트이므로 1바이트 되돌림
-            reader.seek(reader.tell() - std::streamoff(1));
-            break;
-        } else {
-            // 알 수 없는 바이트 → graceful 종료
-            if (!debugLabel.empty()) {
-                std::streampos curPos = reader.tell() - std::streamoff(1);
-                std::cout << "[PKG2 WARN] " << debugLabel
-                          << " 예상치 못한 nodeType=0x" << std::hex << (int)nodeType << std::dec
-                          << " @ offset " << (int64_t)curPos
-                          << " (entries=" << entries.size() << ")\n";
+        }
+    } else {
+        // ── 터미네이터 기반 폴백 (KMST1198 등 카운트 계산 불가 시) ──
+        bool entryCountIs1Byte = (encryptedEntryCount >= -127 && encryptedEntryCount <= 127);
+        while (true) {
+            uint8_t nodeType = reader.readU8();
+            if (nodeType == 0x03 || nodeType == 0x04) {
+                std::string name;
+                if (entries.empty()) {
+                    auto beforeName = reader.tell();
+                    bool usedPkg2Dir = false;
+                    try {
+                        std::string candidate = reader.readPkg2DirString(PKG2_DIR_KEY_1198);
+                        if (isLegalNodeName(candidate)) {
+                            name = candidate; isKmst1198 = true; usedPkg2Dir = true;
+                        }
+                    } catch (...) {}
+                    if (!usedPkg2Dir) {
+                        reader.seek(beforeName);
+                        name = reader.readString(cryptoKey);
+                    }
+                } else {
+                    name = reader.readString(cryptoKey);
+                }
+                int32_t size = reader.readCompressedInt32();
+                int32_t cs32 = reader.readCompressedInt32();
+                entries.push_back({ nodeType, name, size, cs32 });
+            } else if (nodeType == 0x80 ||
+                       (entryCountIs1Byte &&
+                        nodeType == (uint8_t)(int8_t)encryptedEntryCount)) {
+                reader.seek(reader.tell() - std::streamoff(1));
+                break;
+            } else {
+                if (!debugLabel.empty()) {
+                    std::cout << "[PKG2 WARN] " << debugLabel
+                              << " 예상치 못한 nodeType=0x" << std::hex << (int)nodeType << std::dec
+                              << " @ offset " << (int64_t)(reader.tell() - std::streamoff(1))
+                              << " (entries=" << entries.size() << ")\n";
+                    std::cout.flush();
+                }
+                reader.seek(reader.tell() - std::streamoff(1));
+                break;
             }
-            reader.seek(reader.tell() - std::streamoff(1));
-            break;
         }
     }
 
@@ -663,7 +743,8 @@ WzNode readDirTreePkg2(WzReader& reader, const std::vector<uint8_t>& cryptoKey,
         std::cout << "[PKG2 DBG] " << debugLabel
                   << (isKmst1198 ? " [KMST1198+]" : " [KMST1196]")
                   << " enc=" << encryptedEntryCount
-                  << (entryCountIs1Byte ? "[1B]" : "[5B]")
+                  << " decoded=" << entryCount
+                  << (useCountLoop ? "[CNT]" : "[TERM]")
                   << " entries=" << entries.size()
                   << " (dirs=" << dirCount << " imgs=" << imgCount << ")"
                   << " match=" << (matchOk ? "YES" : "NO")
@@ -689,7 +770,7 @@ WzNode readDirTreePkg2(WzReader& reader, const std::vector<uint8_t>& cryptoKey,
         }
     }
 
-    // 하위 디렉토리 재귀 읽기
+    // 하위 디렉토리 재귀 읽기 (순서대로, seek 없음 — C# 동일)
     for (auto& dirName : dirNames) {
         std::string subLabel = debugLabel.empty() ? "" : debugLabel + "/" + dirName;
         WzNode subTree = readDirTreePkg2(reader, cryptoKey, hash1, hash2, subLabel);
@@ -982,23 +1063,31 @@ int main(int argc, char* argv[]) {
         auto ksKMS = generateKeystream(WZ_IV_KMS, KEYSTREAM_SIZE);
         auto ksGMS = generateKeystream(WZ_IV_GMS, KEYSTREAM_SIZE);
 
-        // ── 암호화 타입 감지 ──
-        CryptoType crypto = detectEncryption(reader, header, ksKMS, ksGMS);
-        const char* cryptoName[] = { "BMS (암호화 없음)", "KMS", "GMS" };
-        std::cout << "[암호화] " << cryptoName[(int)crypto] << "\n\n";
-
-        // 사용할 키스트림 선택
+        // ── 암호화 타입 감지 (PKG1 전용; PKG2는 자체 암호화 사용) ──
         std::vector<uint8_t> cryptoKey;
-        switch (crypto) {
-            case CryptoType::KMS: cryptoKey = ksKMS; break;
-            case CryptoType::GMS: cryptoKey = ksGMS; break;
-            default: break; // BMS = 빈 벡터 (no-op)
+        if (header.signature == WZ_SIG_PKG1) {
+            CryptoType crypto = detectEncryption(reader, header, ksKMS, ksGMS);
+            const char* cryptoName[] = { "BMS (암호화 없음)", "KMS", "GMS" };
+            std::cout << "[암호화] " << cryptoName[(int)crypto] << "\n\n";
+            switch (crypto) {
+                case CryptoType::KMS: cryptoKey = ksKMS; break;
+                case CryptoType::GMS: cryptoKey = ksGMS; break;
+                default: break; // BMS = 빈 벡터 (no-op)
+            }
+        } else {
+            std::cout << "[암호화] PKG2 (자체 암호화)\n\n";
         }
 
         // ── 노드 트리 읽기 ──
         reader.seek(header.dataStartPosition);
-        WzNode root = readDirTree(reader, header, cryptoKey);
-        root.name = std::filesystem::path(wzPath).filename().string();
+        WzNode root;
+        std::string rootLabel = std::filesystem::path(wzPath).filename().string();
+        if (header.signature == WZ_SIG_PKG2) {
+            root = readDirTreePkg2(reader, cryptoKey, header.pkg2Hash1, header.pkg2Hash2, rootLabel);
+        } else {
+            root = readDirTree(reader, header, cryptoKey);
+        }
+        root.name = rootLabel;
         root.type = WzNodeType::Directory;
 
         // ── KMST1125 포맷 처리 (C# GetDirTree willLoadBaseWz 로직 동일) ──
