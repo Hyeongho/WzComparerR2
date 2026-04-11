@@ -8,6 +8,10 @@
  *   Linux:   g++ -std=c++17 wz_test.cpp -lssl -lcrypto -o wz_test
  *   Windows: cl /std:c++17 wz_test.cpp /link libssl.lib libcrypto.lib
  *
+ * WzNativeLib.dll 사용 시 (Windows):
+ *   WzNativeLib.dll 을 exe 와 같은 폴더에 배치하면 자동으로 DLL 경유 로딩.
+ *   없으면 내장 C++ 파서로 폴백.
+ *
  * 테스트 경로 (고정):
  *   C:\Nexon\Maple\Data\Base\Base.wz
  */
@@ -27,6 +31,45 @@
 
 // AES 의존성 (libssl-dev / openssl)
 #include <openssl/evp.h>
+
+// Windows DLL 로딩 (WzNativeLib.dll)
+#ifdef _WIN32
+#  include <windows.h>
+#endif
+
+// ================================================================
+// WzNativeLib.dll 래퍼
+// ================================================================
+#ifdef _WIN32
+namespace WzDll {
+
+using FnLoadFolder = const char*(*)(const char* folderPathUtf8);
+using FnLoadFile   = const char*(*)(const char* filePathUtf8);
+using FnFree       = void(*)(const char* ptr);
+
+static HMODULE    hDll       = nullptr;
+static FnLoadFolder loadFolder = nullptr;
+static FnLoadFile   loadFile   = nullptr;
+static FnFree       freeResult = nullptr;
+
+// DLL 로드 시도 — 실패해도 C++ 폴백으로 동작
+static bool tryLoad(const char* dllName = "WzNativeLib.dll") {
+    hDll = LoadLibraryA(dllName);
+    if (!hDll) return false;
+    loadFolder = (FnLoadFolder)GetProcAddress(hDll, "wz_load_folder");
+    loadFile   = (FnLoadFile)  GetProcAddress(hDll, "wz_load_file");
+    freeResult = (FnFree)      GetProcAddress(hDll, "wz_free");
+    if (!loadFolder || !loadFile || !freeResult) {
+        FreeLibrary(hDll); hDll = nullptr;
+        return false;
+    }
+    return true;
+}
+
+static bool available() { return hDll != nullptr; }
+
+} // namespace WzDll
+#endif // _WIN32
 
 // ================================================================
 // 상수 및 암호화 키
@@ -810,10 +853,83 @@ WzNode loadSingleWzTree(const std::string& path, const std::vector<uint8_t>& cry
 //   → Character\Character.wz 를 읽고
 //   → Character_000.wz, Character_001.wz … 를 merge
 // ================================================================
+
+// ── DLL 결과 파서 ─────────────────────────────────────────────────────────
+// DLL 이 반환한 문자열(OK\n depth\ttype\tname\n ...) 을 WzNode 트리로 변환
+static WzNode parseDllTree(const char* result, const std::string& rootName) {
+    WzNode root;
+    root.name = rootName;
+    root.type = WzNodeType::Directory;
+
+    if (!result) return root;
+
+    std::istringstream ss(result);
+    std::string line;
+
+    // 첫 줄: "OK" 또는 "ERR\t..."
+    if (!std::getline(ss, line)) return root;
+    if (!line.empty() && line.back() == '\r') line.pop_back();
+    if (line.rfind("ERR", 0) == 0)
+        throw std::runtime_error("WzDll: " + line.substr(line.size() > 4 ? 4 : line.size()));
+
+    // 플랫 노드 수집
+    struct FlatNode { int depth; WzNodeType type; std::string name; };
+    std::vector<FlatNode> flat;
+    while (std::getline(ss, line)) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        if (line.empty()) continue;
+        size_t t1 = line.find('\t');
+        if (t1 == std::string::npos) continue;
+        size_t t2 = line.find('\t', t1 + 1);
+        if (t2 == std::string::npos) continue;
+        int depth = std::stoi(line.substr(0, t1));
+        char tp   = line[t1 + 1];
+        std::string nm = line.substr(t2 + 1);
+        flat.push_back({ depth, tp == 'I' ? WzNodeType::Image : WzNodeType::Directory, nm });
+    }
+
+    // 재귀적으로 트리 구성 (depth 기반, 포인터 무효화 없음)
+    std::function<int(WzNode&, int, int)> build =
+        [&](WzNode& parent, int idx, int parentDepth) -> int {
+        while (idx < (int)flat.size()) {
+            if (flat[idx].depth <= parentDepth) break;
+            if (flat[idx].depth == parentDepth + 1) {
+                WzNode child;
+                child.name = flat[idx].name;
+                child.type = flat[idx].type;
+                idx = build(child, idx + 1, parentDepth + 1);
+                child.childCount = (int)child.children.size();
+                parent.children.push_back(std::move(child));
+            } else { break; }
+        }
+        return idx;
+    };
+    build(root, 0, -1);
+    root.childCount = (int)root.children.size();
+    return root;
+}
+
 WzNode loadWzFolder(const std::string& folderPath, const std::vector<uint8_t>& cryptoKey) {
     namespace fs = std::filesystem;
     fs::path dir(folderPath);
     std::string name = dir.filename().string();
+
+#ifdef _WIN32
+    // ── DLL 경로 (있으면 C# WzLib 사용) ──
+    if (WzDll::available()) {
+        std::cout << "[loadWzFolder] " << name << " (DLL)\n";
+        const char* result = WzDll::loadFolder(folderPath.c_str());
+        WzNode root;
+        try {
+            root = parseDllTree(result, name);
+            std::cout << "[loadWzFolder] " << name << " 로드 성공, 노드=" << root.children.size() << "\n";
+        } catch (const std::exception& e) {
+            std::cout << "[loadWzFolder] " << name << " DLL 오류: " << e.what() << "\n";
+        }
+        if (result) WzDll::freeResult(result);
+        return root;
+    }
+#endif
 
     // 1. 엔트리 파일 로드
     fs::path entryWz = dir / (name + ".wz");
@@ -991,6 +1107,14 @@ private:
 // main
 // ================================================================
 int main(int argc, char* argv[]) {
+#ifdef _WIN32
+    // WzNativeLib.dll 이 있으면 자동 사용 (없으면 C++ 폴백)
+    if (WzDll::tryLoad())
+        std::cout << "[DLL] WzNativeLib.dll 로드 성공\n";
+    else
+        std::cout << "[DLL] WzNativeLib.dll 없음 — C++ 내장 파서 사용\n";
+#endif
+
     std::string wzPath = "C:\\Nexon\\Maple\\Data\\Base\\Base.wz";
     int maxDepth = 3;
     std::string outputPath;
