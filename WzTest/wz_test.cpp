@@ -61,11 +61,20 @@ static FnFree       freeResult = nullptr;
 // DLL 로드 시도 — 실패해도 C++ 폴백으로 동작
 static bool tryLoad(const char* dllName = "WzNativeLib.dll") {
     hDll = LoadLibraryA(dllName);
-    if (!hDll) return false;
+    if (!hDll) {
+        std::cout << "[WzDll] " << dllName << " 로드 실패 (GetLastError=" << GetLastError() << ")\n";
+        return false;
+    }
     loadFolder = (FnLoadFolder)GetProcAddress(hDll, "wz_load_folder");
     loadFile   = (FnLoadFile)  GetProcAddress(hDll, "wz_load_file");
     freeResult = (FnFree)      GetProcAddress(hDll, "wz_free");
     if (!loadFolder || !loadFile || !freeResult) {
+        std::cout << "[WzDll] 함수 포인터 획득 실패:"
+                  << (!loadFolder ? " wz_load_folder" : "")
+                  << (!loadFile   ? " wz_load_file"   : "")
+                  << (!freeResult ? " wz_free"         : "") << "\n";
+        std::cout << "[WzDll] DLL이 Native AOT로 빌드되지 않은 것 같습니다.\n"
+                  << "[WzDll] VS에서 '빌드(Build)' 대신 '게시(Publish)' -> win-x64-aot 프로필을 사용하세요.\n";
         FreeLibrary(hDll); hDll = nullptr;
         return false;
     }
