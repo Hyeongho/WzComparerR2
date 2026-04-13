@@ -23,11 +23,17 @@
 #include <string>
 #include <vector>
 #include <unordered_map>
+#include <functional>
 #include <cstdint>
 #include <cstring>
 #include <stdexcept>
 #include <filesystem>
 #include <regex>
+
+// MSVC: 소스 파일을 UTF-8로 해석 (한국어 주석 + 특수문자)
+#ifdef _MSC_VER
+#  pragma execution_character_set("utf-8")
+#endif
 
 // AES 의존성 (libssl-dev / openssl)
 #include <openssl/evp.h>
