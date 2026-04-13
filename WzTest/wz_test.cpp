@@ -49,11 +49,13 @@
 #ifdef _WIN32
 namespace WzDll {
 
+using FnOpen       = const char*(*)(const char* pathUtf8);
 using FnLoadFolder = const char*(*)(const char* folderPathUtf8);
 using FnLoadFile   = const char*(*)(const char* filePathUtf8);
 using FnFree       = void(*)(const char* ptr);
 
-static HMODULE    hDll       = nullptr;
+static HMODULE      hDll       = nullptr;
+static FnOpen       openWz     = nullptr;
 static FnLoadFolder loadFolder = nullptr;
 static FnLoadFile   loadFile   = nullptr;
 static FnFree       freeResult = nullptr;
@@ -65,11 +67,13 @@ static bool tryLoad(const char* dllName = "WzNativeLib.dll") {
         std::cout << "[WzDll] " << dllName << " 로드 실패 (GetLastError=" << GetLastError() << ")\n";
         return false;
     }
-    loadFolder = (FnLoadFolder)GetProcAddress(hDll, "wz_load_folder");
-    loadFile   = (FnLoadFile)  GetProcAddress(hDll, "wz_load_file");
-    freeResult = (FnFree)      GetProcAddress(hDll, "wz_free");
-    if (!loadFolder || !loadFile || !freeResult) {
+    openWz     = (FnOpen)       GetProcAddress(hDll, "wz_open");
+    loadFolder = (FnLoadFolder) GetProcAddress(hDll, "wz_load_folder");
+    loadFile   = (FnLoadFile)   GetProcAddress(hDll, "wz_load_file");
+    freeResult = (FnFree)       GetProcAddress(hDll, "wz_free");
+    if (!openWz || !loadFolder || !loadFile || !freeResult) {
         std::cout << "[WzDll] 함수 포인터 획득 실패:"
+                  << (!openWz     ? " wz_open"       : "")
                   << (!loadFolder ? " wz_load_folder" : "")
                   << (!loadFile   ? " wz_load_file"   : "")
                   << (!freeResult ? " wz_free"         : "") << "\n";
@@ -932,8 +936,14 @@ WzNode loadWzFolder(const std::string& folderPath, const std::vector<uint8_t>& c
 #ifdef _WIN32
     // ── DLL 경로 (있으면 C# WzLib 사용) ──
     if (WzDll::available()) {
-        std::cout << "[loadWzFolder] " << name << " (DLL)\n";
-        const char* result = WzDll::loadFolder(folderPath.c_str());
+        // wz_open: 포맷 자동 감지 (KMST1125 / ms / 일반 wz)
+        // folderPath 안의 <name>.wz 파일을 직접 열어줌
+        namespace fs2 = std::filesystem;
+        fs2::path entryWz = fs2::path(folderPath) / (name + ".wz");
+        std::string openPath = fs2::exists(entryWz) ? entryWz.string() : folderPath;
+
+        std::cout << "[loadWzFolder] " << name << " (DLL wz_open)\n";
+        const char* result = WzDll::openWz(openPath.c_str());
         WzNode root;
         try {
             root = parseDllTree(result, name);
