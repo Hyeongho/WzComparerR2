@@ -1123,6 +1123,7 @@ private:
 // ================================================================
 int main(int argc, char* argv[]) {
 #ifdef _WIN32
+    SetConsoleOutputCP(CP_UTF8);  // 콘솔 출력 UTF-8 (한글 깨짐 방지)
     // WzNativeLib.dll 이 있으면 자동 사용 (없으면 C++ 폴백)
     if (WzDll::tryLoad())
         std::cout << "[DLL] WzNativeLib.dll 로드 성공\n";
