@@ -34,6 +34,7 @@ namespace WzComparerR2.CharaSim
         public Potential[] Options { get; private set; }
         public Potential[] AdditionalOptions { get; private set; }
         public AlienStone AlienStoneSlot { get; set; }
+        public GearLimitedLabel LimitedLabel { get; private set; } = new();
 
         public int Star { get; set; }
         public int ScrollUp { get; set; }
@@ -42,7 +43,6 @@ namespace WzComparerR2.CharaSim
         public int PlatinumHammer { get; set; }
         public bool CanPotential { get; internal set; }
         public string EpicHs { get; internal set; }
-        public string LabelGradeTooltip { get; internal set; }
         public string SpecificTargetDesc { get; internal set; }
         public BitmapOrigin ToolTIpPreview { get; set; }
         public BitmapOrigin IllusionRingPreview { get; set; }
@@ -376,6 +376,7 @@ namespace WzComparerR2.CharaSim
                 case GearType.face2:
                 case GearType.hair3:
                 case GearType.hair4:
+                case GearType.face3:
                 case GearType.medal:
                 case GearType.android:
                 case GearType.shovel:
@@ -426,6 +427,7 @@ namespace WzComparerR2.CharaSim
                 case GearType.hair4:
                 case GearType.face:
                 case GearType.face2:
+                case GearType.face3:
                 case GearType.cap:
                 case GearType.faceAccessory:
                 case GearType.eyeAccessory:
@@ -683,6 +685,7 @@ namespace WzComparerR2.CharaSim
                 case GearType.hair4:
                 case GearType.face:
                 case GearType.face2:
+                case GearType.face3:
                     return GetCosmeticGender(code) - 1;
             }
 
@@ -1159,8 +1162,20 @@ namespace WzComparerR2.CharaSim
                             }
                             break;
 
+                        case "limitedLabelTooltipName":
+                            gear.LimitedLabel.TooltipName = Convert.ToString(subNode.Value);
+                            break;
+
+                        case "limitedLabelTooltipNameColor":
+                            gear.LimitedLabel.TooltipNameColor = subNode.GetValueEx<int>(0);
+                            break;
+
+                        case "limitedLabelIconLabelNum":
+                            gear.LimitedLabel.IconLabelNum = subNode.GetValueEx<int>(16);
+                            break;
+
                         case "limitedLabelGradeTooltip":
-                            gear.LabelGradeTooltip = Convert.ToString(subNode.Value);
+                            gear.LimitedLabel.GradeTooltip = Convert.ToString(subNode.Value);
                             break;
 
                         case string text when text.StartsWith("specificTarget"):

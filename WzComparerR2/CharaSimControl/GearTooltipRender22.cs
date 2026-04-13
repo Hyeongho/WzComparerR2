@@ -303,12 +303,13 @@ namespace WzComparerR2.CharaSimControl
             }
             else if (Gear.Props.TryGetValue(GearPropType.limitedLabel, out value) && value > 0)
             {
-                TextRenderer.DrawText(g, "LIMITED 라벨", GearGraphics.EquipMDMoris9Font, new Point(width, picH), Color.FromArgb(248, 196, 129), TextFormatFlags.HorizontalCenter);
+                Color limitedLabelTooltipColor = Color.FromArgb(Gear.LimitedLabel.TooltipNameColor);
+                TextRenderer.DrawText(g, Gear.LimitedLabel.TooltipName, GearGraphics.EquipMDMoris9Font, new Point(width, picH), limitedLabelTooltipColor, TextFormatFlags.HorizontalCenter);
                 picH += 16;
-                if (!string.IsNullOrEmpty(Gear.LabelGradeTooltip))
+                if (!string.IsNullOrEmpty(Gear.LimitedLabel.GradeTooltip))
                 {
-                    var limitedLabelText = Regex.Replace(Gear.LabelGradeTooltip, "%d", "0");
-                    TextRenderer.DrawText(g, limitedLabelText, GearGraphics.EquipMDMoris9Font, new Point(width, picH), Color.FromArgb(248, 196, 129), TextFormatFlags.HorizontalCenter);
+                    var limitedLabelText = Regex.Replace(Gear.LimitedLabel.GradeTooltip, "%d", "0");
+                    TextRenderer.DrawText(g, limitedLabelText, GearGraphics.EquipMDMoris9Font, new Point(width, picH), limitedLabelTooltipColor, TextFormatFlags.HorizontalCenter);
                     picH += 16;
                 }
             }
@@ -416,7 +417,7 @@ namespace WzComparerR2.CharaSimControl
                 }
                 else if (Gear.Props.TryGetValue(GearPropType.limitedLabel, out value) && value > 0)
                 {
-                    cashImg = Resource.CashShop_img_CashItem_label_15;
+                    cashImg = (Bitmap)Resource.ResourceManager.GetObject($"CashShop_img_CashItem_label_{Gear.LimitedLabel.IconLabelNum}");
                     cashOrigin = new Point(12, 12);
                 }
                 else if (Gear.Props.TryGetValue(GearPropType.magicLayerWz2, out value) && value > 0)
@@ -1935,6 +1936,12 @@ namespace WzComparerR2.CharaSimControl
                 tags.Add(string.Join("#$r,# ", tempTags));
             }
             tempTags.Clear();
+            // 특수 스킬 반지
+            if (Gear.Props.TryGetValue(GearPropType.activeSkillRing, out value) && value != 0)
+            {
+                tags.Add($"#$r아이템 그룹 내 중복 장착 불가# (특수 스킬 반지)\n" + 
+                    $"#$r액티브 특수 스킬 반지 중복 장착 불가#");
+            }
 
             // 프리즘 불가
             if (Gear.Props.TryGetValue(GearPropType.noPrism, out value) && value != 0)
