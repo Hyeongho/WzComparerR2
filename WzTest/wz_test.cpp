@@ -81,9 +81,16 @@ namespace WzDll
     }
 } // namespace WzDll
 
-// ── 트리 출력 ───────────────────────────────────────────────────────────────
-static void printTree(const char* result)
+// ── 트리 출력 (콘솔 + 파일 동시 출력) ─────────────────────────────────────
+// log: 파일 스트림 (nullptr이면 파일 출력 생략)
+static void printTree(const char* result, std::ofstream* log = nullptr)
 {
+    // 콘솔과 파일에 동시에 한 줄 출력하는 람다
+    auto writeLine = [&](const std::string& line) {
+        std::cout << line << "\n";
+        if (log && log->is_open()) *log << line << "\n";
+    };
+
     if (!result) { std::cerr << "[오류] null 반환\n"; return; }
 
     std::string s(result);
@@ -98,7 +105,7 @@ static void printTree(const char* result)
     if (pos == std::string::npos) return;
     pos++;  // OK 줄 건너뜀
 
-    int count = 0;
+    int imgCount = 0, dirCount = 0;
     while (pos < s.size()) {
         size_t nl = s.find('\n', pos);
         if (nl == std::string::npos) nl = s.size();
@@ -114,15 +121,17 @@ static void printTree(const char* result)
                 char type = line[t1 + 1];
                 std::string name = line.substr(t2 + 1);
                 std::string indent(depth * 2, ' ');
-                std::cout << indent
-                          << (type == 'I' ? "[IMG] " : "[DIR] ")
-                          << name << "\n";
-                count++;
+                writeLine(indent + (type == 'I' ? "[IMG] " : "[DIR] ") + name);
+                if (type == 'I') imgCount++; else dirCount++;
             }
         }
         pos = nl + 1;
     }
-    std::cout << "총 " << count << " 개 항목\n";
+
+    std::string summary = "총 " + std::to_string(imgCount + dirCount)
+                        + " 개 항목  (IMG: " + std::to_string(imgCount)
+                        + ", DIR: " + std::to_string(dirCount) + ")";
+    writeLine(summary);
 }
 
 // ── IMG 추출 ────────────────────────────────────────────────────────────────
@@ -174,10 +183,21 @@ int main(int argc, char* argv[])
 
     if (!WzDll::tryLoad(dllPath)) return 1;
 
-    // ── 트리 덤프
-    std::cout << "=== WZ 트리: " << wzPath << " ===\n";
+    // ── 로그 파일 열기 (WZ 파일명_tree.txt, 실행 폴더에 저장)
+    std::string logName = fs2::path(wzPath).stem().string() + "_tree.txt";
+    std::ofstream logFile(logName, std::ios::out);
+    if (!logFile.is_open())
+        std::cerr << "[경고] 로그 파일 열기 실패: " << logName << " (콘솔만 출력)\n";
+    else
+        std::cout << "[로그] " << logName << " 에 저장됩니다.\n";
+
+    // ── 트리 덤프 (콘솔 + 파일 동시)
+    std::string header = "=== WZ 트리: " + wzPath + " ===";
+    std::cout << header << "\n";
+    if (logFile.is_open()) logFile << header << "\n";
+
     const char* result = WzDll::openWz(wzPath.c_str());
-    printTree(result);
+    printTree(result, logFile.is_open() ? &logFile : nullptr);
     WzDll::freeResult(result);
 
     // ── IMG 추출 (인자가 있을 때)
