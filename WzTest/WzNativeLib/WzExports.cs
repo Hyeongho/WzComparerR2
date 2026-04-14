@@ -150,9 +150,9 @@ public static unsafe class WzExports
     // outLen     : 반환 바이트 수 (실패 시 0)
     // 반환       : IMG raw 바이트 포인터 (wz_free로 해제), 실패 시 IntPtr.Zero
     [UnmanagedCallersOnly(EntryPoint = "wz_read_img")]
-    public static IntPtr WzReadImg(IntPtr wzPathUtf8, IntPtr imgPathUtf8, out int outLen)
+    public static IntPtr WzReadImg(IntPtr wzPathUtf8, IntPtr imgPathUtf8, int* outLen)
     {
-        outLen = 0;
+        *outLen = 0;
         try
         {
             string wzPath  = Marshal.PtrToStringUTF8(wzPathUtf8)  ?? throw new ArgumentNullException("wzPath");
@@ -200,7 +200,7 @@ public static unsafe class WzExports
 
             IntPtr ptr = Marshal.AllocCoTaskMem(read);
             Marshal.Copy(bytes, 0, ptr, read);
-            outLen = read;
+            *outLen = read;
             return ptr;
         }
         catch
