@@ -160,15 +160,17 @@ int main(int argc, char* argv[])
 {
     SetConsoleOutputCP(CP_UTF8);
 
-    if (argc < 3) {
-        std::cerr << "사용법: wz_test.exe <WzNativeLib.dll> <WZ경로> [IMG이름] [저장경로]\n";
-        return 1;
-    }
+    // ── 기본값 (인자 없을 때 사용) ─────────────────────────────────────────
+    std::string dllPath = "WzNativeLib.dll";
+    std::string wzPath  = R"(C:\Nexon\MapleStory\Data\Skill.wz)";
+    std::string imgPath = "";   // IMG 추출할 경우 파일명 (예: "000.img")
+    std::string outPath = "";   // 저장 경로 (비어 있으면 imgPath 이름으로 저장)
 
-    std::string dllPath = argv[1];
-    std::string wzPath  = argv[2];
-    std::string imgPath = (argc >= 4) ? argv[3] : "";
-    std::string outPath = (argc >= 5) ? argv[4] : "";
+    // 명령줄 인자가 있으면 덮어씀
+    if (argc >= 2) dllPath = argv[1];
+    if (argc >= 3) wzPath  = argv[2];
+    if (argc >= 4) imgPath = argv[3];
+    if (argc >= 5) outPath = argv[4];
 
     if (!WzDll::tryLoad(dllPath)) return 1;
 
