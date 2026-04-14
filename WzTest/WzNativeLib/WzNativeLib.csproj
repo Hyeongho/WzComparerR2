@@ -1,19 +1,20 @@
 <Project Sdk="Microsoft.NET.Sdk">
-
   <PropertyGroup>
     <OutputType>Library</OutputType>
     <TargetFramework>net8.0</TargetFramework>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
-    <PublishAot>true</PublishAot>
+    <AssemblyName>WzNativeLib</AssemblyName>
+    <RootNamespace>WzNativeLib</RootNamespace>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <Nullable>enable</Nullable>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <!-- AOT 트리밍 설정: WzLib 전체 보존 -->
+    <LangVersion>latest</LangVersion>
+    <!-- Native AOT -->
+    <PublishAot>true</PublishAot>
+    <NativeLib>Shared</NativeLib>
+    <!-- Trimming: keep all of WzLib -->
     <TrimmerRootAssembly>WzComparerR2.WzLib</TrimmerRootAssembly>
   </PropertyGroup>
-
   <ItemGroup>
     <ProjectReference Include="../../WzComparerR2.WzLib/WzComparerR2.WzLib.csproj" />
   </ItemGroup>
-
 </Project>

@@ -4,7 +4,7 @@
 //   dotnet publish -r win-x64 -p:NativeLib=Shared -c Release
 //   → bin\Release\net8.0\win-x64\publish\WzNativeLib.dll
 //
-// 반환 형식 (UTF-8):
+// 반환 형식 (wz_open / wz_load_folder / wz_load_file, UTF-8):
 //   첫 줄: "OK" 또는 "ERR\t<메시지>"
 //   이후 각 줄: "<depth>\t<type>\t<name>"
 //     depth : 0부터 시작하는 정수 (0 = 최상위 자식)
@@ -142,8 +142,75 @@ public static unsafe class WzExports
         }
     }
 
+    // ── wz_read_img ─────────────────────────────────────────────────────────
+    // wzPathUtf8 : WZ 파일 경로 (예: C:\Maple\Data\Skill.wz)
+    //              또는 WZ 폴더 경로 (예: C:\Maple\Data\Skill)
+    // imgPathUtf8: IMG 노드 이름 또는 백슬래시 구분 경로 (예: "Dragon.img", "Skill\Dragon.img")
+    //              빈 문자열이면 wzPath 자체가 .img 파일로 간주
+    // outLen     : 반환 바이트 수 (실패 시 0)
+    // 반환       : IMG raw 바이트 포인터 (wz_free로 해제), 실패 시 IntPtr.Zero
+    [UnmanagedCallersOnly(EntryPoint = "wz_read_img")]
+    public static IntPtr WzReadImg(IntPtr wzPathUtf8, IntPtr imgPathUtf8, out int outLen)
+    {
+        outLen = 0;
+        try
+        {
+            string wzPath  = Marshal.PtrToStringUTF8(wzPathUtf8)  ?? throw new ArgumentNullException("wzPath");
+            string imgPath = Marshal.PtrToStringUTF8(imgPathUtf8) ?? "";
+
+            Wz_Image? img = null;
+
+            if (string.IsNullOrEmpty(imgPath))
+            {
+                // wzPath 자체가 .img 파일인 경우
+                var structure = new Wz_Structure();
+                structure.Load(wzPath, false);
+                img = structure.WzNode?.Value as Wz_Image;
+            }
+            else
+            {
+                // wzPath = WZ 파일 또는 폴더, imgPath = 내부 노드 경로 (백슬래시 구분)
+                var structure = new Wz_Structure();
+                Wz_Node? rootNode = null;
+
+                if (Directory.Exists(wzPath))
+                    structure.LoadWzFolder(wzPath, ref rootNode, false);
+                else
+                    structure.Load(wzPath, false);
+
+                Wz_Node? root = rootNode ?? structure.WzNode;
+                // FindNodeByPath(string, bool) → 내부에서 '\' 로 분리 (Wz_Node.cs:121)
+                Wz_Node? found = root?.FindNodeByPath(imgPath, false);
+                img = found?.Value as Wz_Image;
+            }
+
+            if (img == null)
+                return IntPtr.Zero;
+
+            using var stream = img.OpenRead();
+            int len = (int)stream.Length;
+            byte[] bytes = new byte[len];
+            int read = 0;
+            while (read < len)
+            {
+                int n = stream.Read(bytes, read, len - read);
+                if (n == 0) break;
+                read += n;
+            }
+
+            IntPtr ptr = Marshal.AllocCoTaskMem(read);
+            Marshal.Copy(bytes, 0, ptr, read);
+            outLen = read;
+            return ptr;
+        }
+        catch
+        {
+            return IntPtr.Zero;
+        }
+    }
+
     // ── wz_free ─────────────────────────────────────────────────────────────
-    // wz_open / wz_load_folder / wz_load_file 가 반환한 포인터를 해제
+    // wz_open / wz_load_folder / wz_load_file / wz_read_img 가 반환한 포인터를 해제
     [UnmanagedCallersOnly(EntryPoint = "wz_free")]
     public static void WzFree(IntPtr ptr)
     {
