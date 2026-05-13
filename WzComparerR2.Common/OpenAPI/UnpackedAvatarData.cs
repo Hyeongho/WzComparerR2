@@ -80,7 +80,19 @@ namespace WzComparerR2.OpenAPI
             if (id == -1) return "";
 
             var ret = "";
-            ret += GetValue("face50k") != 0 ? 5 : 2;
+            var face10k = GetValue("face10k");
+            switch (face10k)
+            {
+                case 0:
+                    ret += 2;
+                    break;
+                case 1:
+                    ret += 5;
+                    break;
+                default:
+                    ret += face10k;
+                    break;
+            }
             ret += GetValue("faceGender");
             ret += id.ToString().PadLeft(3, '0');
             return ret;
@@ -254,9 +266,8 @@ namespace WzComparerR2.OpenAPI
             }
 
             var g = GetValue("weaponGender").ToString();
-            if (int.Parse(g) <= 0) g = "";
+            if (ret.Length == 3) ret += g;
 
-            ret += g;
             ret += id.ToString().PadLeft(3, '0');
             return ret;
         }

@@ -66,8 +66,6 @@ namespace WzComparerR2.MapRender
 
                 enableMobMovement = value;
                 var hs = new HashSet<int>();
-                this.moveLayerQueue.Clear();
-                this.addToLayerQueue.Clear();
                 foreach (var life in this.Scene.Mobs)
                 {
                     if (life.Controller != null)
@@ -759,7 +757,7 @@ namespace WzComparerR2.MapRender
         {
             string path = $@"Map\Obj\{obj.OS}.img\{obj.L0}\{obj.L1}\{obj.L2}";
             var aniItem = resLoader.LoadAnimationData(path);
-            obj.View = new ObjItem.ItemView()
+            obj.View = new ObjItem.ItemView(obj)
             {
                 Animator = CreateAnimator(aniItem, obj.SpineAni),
                 Flip = obj.Flip
@@ -1217,6 +1215,10 @@ namespace WzComparerR2.MapRender
                     {
                         spineAni.SelectedAnimationName = aniName;
                     }
+                    else
+                    {
+                        spineAni.SelectedAnimationIndex = -1;
+                    }
                     return spineAni;
 
                 case MsCustomSpriteData msSpriteData:
@@ -1522,8 +1524,6 @@ namespace WzComparerR2.MapRender
         public void ResetAllMobs()
         {
             var hs = new HashSet<int>();
-            this.moveLayerQueue.Clear();
-            this.addToLayerQueue.Clear();
             foreach (var life in this.Scene.Mobs)
             {
                 if (life.Controller != null && life.Controller.CanDie)
