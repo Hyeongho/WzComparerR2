@@ -176,12 +176,91 @@ namespace WzComparerR2.WzLib.Utilities
             }
         }
 
-        // temp workaround for unknown pkg2 encryption
-        public string ForceReadPkg2DirString(byte nodeType, string fullpath = null)
+        // Introduced in KMST1202, 16bit length prefix string
+        public string ReadPkg2DirStringV2(IWzDecrypter decrypter)
         {
             long currentPos = this.BaseStream.Position;
 
-            int size = this.ReadSByte();
+            int size = this.ReadInt16();
+            if (size < 0)
+            {
+                size = -size;
+                int byteSize = size * 2;
+                var buffer = ArrayPool<byte>.Shared.Rent(byteSize);
+                try
+                {
+                    this.BaseStream.ReadExactly(buffer, 0, byteSize);
+                    decrypter.Decrypt(buffer.AsSpan(0, byteSize));
+                    Span<char> chars = MemoryMarshal.Cast<byte, char>(buffer.AsSpan(0, byteSize));
+                    return this.stringPool != null ? this.stringPool.GetOrAdd(currentPos, chars) : chars.ToString();
+                }
+                finally
+                {
+                    ArrayPool<byte>.Shared.Return(buffer);
+                }
+            }
+            else if (size > 0)
+            {
+                throw new Exception($"Unexpected string length: {size}");
+            }
+            else
+            {
+                return string.Empty;
+            }
+        }
+
+        // temp workaround for unknown pkg2 encryption
+        public string ReadStringWDirNameContainer(byte nodeType, string fullpath, IWzDecrypter decrypter)
+        {
+            string ret = ReadString(decrypter);
+            return ret;
+            if (nodeType == 0x03)
+            {
+                try
+                {
+                    if (fullpath != null)
+                    {
+                        string dir = Path.GetDirectoryName(fullpath);
+                        List<string> cand_dir;
+                        if (DirNameContainer.Dirs.ContainsKey(dir))
+                        {
+                            cand_dir = DirNameContainer.Dirs[dir];
+                            int idx = cand_dir.IndexOf(ret);
+                            if (idx != -1)
+                            {
+                                cand_dir.RemoveAt(idx);
+                            }
+                        }
+                        else
+                        {
+                            if (fullpath.Contains("Base.wz"))
+                            {
+                                string parentDir = Directory.GetParent(dir)!.FullName;
+                                cand_dir = Directory.GetDirectories(parentDir).Select(Path.GetFileName).Where(name => name != "Packs" && name != "Base").ToList();
+                            }
+                            else
+                            {
+                                cand_dir = Directory.GetDirectories(dir).Select(Path.GetFileName).ToList();
+                            }
+                            int idx = cand_dir.IndexOf(ret);
+                            if (idx != -1)
+                            {
+                                cand_dir.RemoveAt(idx);
+                            }
+                            DirNameContainer.Dirs[dir] = cand_dir;
+                        }
+                    }
+                }
+                catch { }
+            }
+            return ret;
+        }
+
+        public string ForceReadPkg2DirString(byte nodeType, string fullpath = null, bool read2bytes = false)
+        {
+            long currentPos = this.BaseStream.Position;
+
+            int size = read2bytes ? this.ReadInt16() : this.ReadSByte();
             if (size < 0)
             {
                 size = -size;
@@ -218,9 +297,39 @@ namespace WzComparerR2.WzLib.Utilities
                         {
                             if (fullpath != null)
                             {
+                                string result_dir = null;
                                 string dir = Path.GetDirectoryName(fullpath);
-                                List<string> cand_dir = Directory.GetDirectories(dir).Select(Path.GetFileName).ToList();
-                                string result_dir = cand_dir.FirstOrDefault(s => s.Length == size);
+                                List<string> cand_dir;
+                                if (DirNameContainer.Dirs.ContainsKey(dir))
+                                {
+                                    cand_dir = DirNameContainer.Dirs[dir];
+                                    result_dir = cand_dir.FirstOrDefault(s => s.Length == size);
+                                    int idx = cand_dir.IndexOf(result_dir);
+                                    if (idx != -1)
+                                    {
+                                        cand_dir.RemoveAt(idx);
+                                    }
+                                }
+                                else
+                                {
+                                    if (fullpath.Contains("Base.wz"))
+                                    {
+                                        string parentDir = Directory.GetParent(dir)!.FullName;
+                                        cand_dir = Directory.GetDirectories(parentDir).Select(Path.GetFileName).Where(name => name != "Packs" && name != "Base").ToList();
+                                    }
+                                    else
+                                    {
+                                        cand_dir = Directory.GetDirectories(dir).Select(Path.GetFileName).ToList();
+                                    }
+                                    result_dir = cand_dir.FirstOrDefault(s => s.Length == size);
+                                    int idx = cand_dir.IndexOf(result_dir);
+                                    if (idx != -1)
+                                    {
+                                        cand_dir.RemoveAt(idx);
+                                    }
+                                    DirNameContainer.Dirs[dir] = cand_dir;
+                                }
+
                                 if (!string.IsNullOrEmpty(result_dir))
                                 {
                                     return result_dir;

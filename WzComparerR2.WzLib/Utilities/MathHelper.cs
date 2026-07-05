@@ -261,5 +261,25 @@ namespace WzComparerR2.WzLib.Utilities
 
             return cs;
         }
+
+        public static uint GatherAsUInt32(ReadOnlySpan<byte> data, ReadOnlySpan<int> offsets)
+        {
+            return (uint)data[offsets[0]]
+                 | (uint)data[offsets[1]] << 8
+                 | (uint)data[offsets[2]] << 16
+                 | (uint)data[offsets[3]] << 24;
+        }
+
+        public static ulong GatherAsUInt64(ReadOnlySpan<byte> data, ReadOnlySpan<int> offsets)
+        {
+            return (ulong)data[offsets[0]]
+                 | (ulong)data[offsets[1]] << 8
+                 | (ulong)data[offsets[2]] << 16
+                 | (ulong)data[offsets[3]] << 24
+                 | (ulong)data[offsets[4]] << 32
+                 | (ulong)data[offsets[5]] << 40
+                 | (ulong)data[offsets[6]] << 48
+                 | (ulong)data[offsets[7]] << 56;
+        }
     }
 }

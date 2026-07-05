@@ -79,7 +79,7 @@ namespace WzComparerR2.MapRender
                             }
                             life.Controller.SetDied(blockRevive: true);
                         }
-                        life.Controller.MovementEnabled = value;
+                        life.Controller.EnableMovement(value);
                     }
                 }
             }
@@ -1211,14 +1211,7 @@ namespace WzComparerR2.MapRender
 
                 case ISpineAnimationData spineAniData:
                     var spineAni = spineAniData.CreateAnimator();
-                    if (aniName != null)
-                    {
-                        spineAni.SelectedAnimationName = aniName;
-                    }
-                    else
-                    {
-                        spineAni.SelectedAnimationIndex = -1;
-                    }
+                    spineAni.SelectedAnimationName = aniName;
                     return spineAni;
 
                 case MsCustomSpriteData msSpriteData:

@@ -93,8 +93,17 @@ namespace WzComparerR2.CharaSim
             }
         }
 
-        public int GetMaxStar(Dictionary<int, AstraSubWeaponInfo> loadedAstraSubWeapons)
+        public int GetMaxStar(Dictionary<int, List<int>> loadedDestinyWeapons, Dictionary<int, AstraSubWeaponInfo> loadedAstraSubWeapons)
         {
+            if (IsGenesisWeapon)
+            {
+                if (IsDestinyWeapon(loadedDestinyWeapons, 2))
+                {
+                    return 25;
+                }
+                return 22;
+            }
+
             var astraIdx = GetAstraIndex(loadedAstraSubWeapons, this.ItemID);
             switch (astraIdx)
             {
@@ -210,18 +219,21 @@ namespace WzComparerR2.CharaSim
             }
         }
 
-        public bool IsDestinyWeapon
+        public bool IsDestinyWeapon(Dictionary<int, List<int>> weaponList, int phase)
         {
-            get
-            {
-                if (IsGenesisWeapon &&
-                    this.Props.TryGetValue(GearPropType.reqLevel, out var equipLevel)
-                    && equipLevel == 250)
-                {
-                    return true;
-                }
-                return false;
-            }
+            return (weaponList.ContainsKey(phase) && weaponList[phase].Contains(this.ItemID));
+        }
+
+        public int[] GetGenesisSkillList(Dictionary<int, List<int>> weaponList)
+        {
+            if (IsDestinyWeapon(weaponList, 2))
+                return new[] { 80004115, 80004116, 80004118 };
+            else if (IsDestinyWeapon(weaponList, 1))
+                return new[] { 80003873, 80003874 };
+            else if (IsGenesisWeapon)
+                return new[] { 80002632, 80002633 };
+            else
+                return Array.Empty<int>();
         }
 
         public void Upgrade(Wz_Node infoNode, int count)
@@ -303,6 +315,7 @@ namespace WzComparerR2.CharaSim
                 case GearType.demonShield:
                 case GearType.soulShield:
                 case GearType.hourGlass:
+                case GearType.magicQuill:
                     return true;
 
                 default:
@@ -385,6 +398,7 @@ namespace WzComparerR2.CharaSim
                 case GearType.authenticSymbol:
                 case GearType.grandAuthenticSymbol:
                 case GearType.petEquip:
+                case GearType.equipBag:
                     return false;
                 default:
                     return true;
@@ -479,7 +493,8 @@ namespace WzComparerR2.CharaSim
             return (_type >= 140 && _type <= 149)
                 || (_type >= 152 && _type <= 159)
                 || type == GearType.boxingCannon
-                || type == GearType.chakram;
+                || type == GearType.chakram
+                || type == GearType.gram;
         }
 
         public static bool IsMechanicGear(GearType type)
@@ -610,15 +625,18 @@ namespace WzComparerR2.CharaSim
                 case 1213:
                 case 1214:
                 case 1215:
+                case 1216:
                 case 1252:
                 case 1253:
                 case 1254:
                 case 1259:
                 case 1403:
                 case 1404:
+                case 1433:
                 case 1712:
                 case 1713:
                 case 1714:
+                case 1726:
                     return (GearType)(code / 1000);
             }
             if (code / 10000 == 135)
@@ -661,36 +679,85 @@ namespace WzComparerR2.CharaSim
             if (code / 10000 == 172)
             {
                 var index = (code % 10000) / 100;
-                var type_list = new[]
-                {
-                    GearType.heroMedal, GearType.rosario, GearType.chain, // 0 1 2
-                    GearType.book1, GearType.book2, GearType.book3, // 3 4 5
-                    GearType.bowMasterFeather, GearType.crossBowThimble, GearType.relic, // 6 7 8
-                    GearType.nightLordPoutch, GearType.shadowerSheath, // 9 10
-                    GearType.viperWristband, GearType.captainSight, GearType.connonGunPowder, // 11 12 13
-                    GearType.cygnusGem, GearType.cygnusGem, GearType.cygnusGem, GearType.cygnusGem, GearType.cygnusGem, GearType.cygnusGem, // 14 15 16 17 18 19
-                    GearType.aranPendulum, GearType.magicArrow, GearType.card, GearType.orb, GearType.foxPearl, GearType.evanPaper, // 20 21 22 23 24 25
-                    GearType.demonShield, GearType.battlemageBall, GearType.wildHunterArrowHead, GearType.mailin, GearType.controller, GearType.ExplosivePill, GearType.demonShield, // 26 27 28 29 30 31 32
-                    GearType.novaMarrow, GearType.weaponBelt, GearType.transmitter, GearType.soulBangle, // 33 34 35 36
-                    GearType.hourGlass, GearType.chess, // 37 38
-                    GearType.bracelet, GearType.magicWing, GearType.hexSeeker, GearType.pathOfAbyss, // 39 40 41 42
-                    GearType.sacredJewel, GearType.ornament, GearType.fanTassel, // 43 44 45
-                };
-                return (index < type_list.Count()) ? type_list[index] : GearType.subWeapon;
+                return (AstraSubweaponTable.ContainsKey(index)) ? AstraSubweaponTable[index] : GearType.subWeapon;
             }
             return (GearType)(code / 10000);
         }
 
         public static int GetAstraIndex(Dictionary<int, AstraSubWeaponInfo> loadedAstraSubWeapons, int id)
         {
-            if (id / 10000 == 172)
-                return id % 10;
-
             if (loadedAstraSubWeapons.TryGetValue(id, out AstraSubWeaponInfo value))
                 return value.Index;
 
             return -1;
         }
+
+        private static readonly Dictionary<int, GearType> AstraSubweaponTable = new Dictionary<int, GearType>()
+        {
+            { 0, GearType.heroMedal },
+            { 1, GearType.rosario },
+            { 2, GearType.chain },
+
+            { 3, GearType.book1 },
+            { 4, GearType.book2 },
+            { 5, GearType.book3 },
+
+            { 6, GearType.bowMasterFeather },
+            { 7, GearType.crossBowThimble },
+            { 8, GearType.relic },
+
+            { 9, GearType.nightLordPoutch },
+            { 10, GearType.shadowerSheath },
+            { 11, GearType.viperWristband },
+
+            { 12, GearType.captainSight },
+            { 13, GearType.connonGunPowder },
+
+            { 14, GearType.cygnusGem },
+            { 15, GearType.cygnusGem },
+            { 16, GearType.cygnusGem },
+            { 17, GearType.cygnusGem },
+            { 18, GearType.cygnusGem },
+            { 19, GearType.cygnusGem },
+
+            { 20, GearType.aranPendulum },
+            { 21, GearType.magicArrow },
+            { 22, GearType.card },
+            { 23, GearType.orb },
+            { 24, GearType.foxPearl },
+            { 25, GearType.evanPaper },
+
+            { 26, GearType.demonShield },
+            { 27, GearType.battlemageBall },
+            { 28, GearType.wildHunterArrowHead },
+            { 29, GearType.mailin },
+            { 30, GearType.controller },
+            { 31, GearType.ExplosivePill },
+            { 32, GearType.demonShield },
+
+            { 33, GearType.novaMarrow },
+            { 34, GearType.weaponBelt },
+            { 35, GearType.transmitter },
+            { 36, GearType.soulBangle },
+
+            { 37, GearType.hourGlass },
+            { 38, GearType.chess },
+
+            { 39, GearType.bracelet },
+            { 40, GearType.magicWing },
+            { 41, GearType.hexSeeker },
+            { 42, GearType.pathOfAbyss },
+
+            { 43, GearType.sacredJewel },
+            { 44, GearType.ornament },
+            { 45, GearType.fanTassel },
+
+            { 50, GearType.kodachi2 },
+            { 52, GearType.boxingSky },
+
+            { 53, GearType.compass },
+            { 54, GearType.keir },
+        };
 
         public static int GetGender(int code)
         {
@@ -702,6 +769,7 @@ namespace WzComparerR2.CharaSim
                 case GearType.powerSource:
                 case GearType.bit:
                 case GearType.jewel:
+                case GearType.equipBag:
                     return 2;
                 case GearType.hair:
                 case GearType.hair2:
@@ -724,6 +792,7 @@ namespace WzComparerR2.CharaSim
             {
                 case 2: // face
                 case 5:
+                case 8:
                     switch (check % 10)
                     {
                         case 0:

@@ -161,6 +161,9 @@ namespace WzComparerR2.CharaSim
         /// 장검 1215
         /// </summary>
         longSword = 1215,
+        /// 카르타 1216
+        /// </summary>
+        carta = 1216,
         /// <summary>
         /// 灵魂手铳 122
         /// </summary>
@@ -322,6 +325,10 @@ namespace WzComparerR2.CharaSim
         /// </summary>
         compass = 135287,
         /// <summary>
+        /// 케이르 135_88
+        /// </summary>
+        keir = 135288,
+        /// <summary>
         /// 手腕护带 135_90
         /// </summary>
         viperWristband = 135290,
@@ -458,6 +465,10 @@ namespace WzComparerR2.CharaSim
         /// </summary>
         spear = 143,
         /// <summary>
+        /// 그람 1433
+        /// </summary>
+        gram = 1433,
+        /// <summary>
         /// 矛 144
         /// </summary>
         polearm = 144,
@@ -559,6 +570,9 @@ namespace WzComparerR2.CharaSim
         /// </summary>
         hourGlass = 17237,
         /// <summary>
+        /// 마법깃펜 1726
+        /// </summary>
+        magicQuill = 1726,
         /// 珠宝 178
         /// </summary>
         jewel = 178,
@@ -573,6 +587,10 @@ namespace WzComparerR2.CharaSim
         /// 宠物装备 180
         /// </summary>
         petEquip = 180,
+        /// <summary>
+        /// 장비가방 184
+        /// </summary>
+        equipBag = 184,
         /// <summary>
         /// 骑兽 190
         /// </summary>

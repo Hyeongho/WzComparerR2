@@ -276,6 +276,7 @@ namespace WzComparerR2.CharaSimControl
 
         public static readonly Color SkillSummaryOrangeTextColor = Color.FromArgb(255, 204, 0);
         public static readonly Brush SkillSummaryOrangeTextBrush = new SolidBrush(SkillSummaryOrangeTextColor);
+        public static readonly Color SkillHighlightColor = Color.FromArgb(51, 255, 255);
 
         public static readonly Brush Equip22BrushGray = new SolidBrush(Color.FromArgb(183, 191, 197));
         public static readonly Brush Equip22BrushDarkGray = new SolidBrush(Color.FromArgb(133, 145, 159));
@@ -384,7 +385,7 @@ namespace WzComparerR2.CharaSimControl
         }
 
         public static void DrawString(Graphics g, string s, Font font, IDictionary<string, Color> fontColorTable, IDictionary<string, Font> fontTable, IDictionary<string, Bitmap> imageTable,
-            int x, int x1, ref int y, int height, TextAlignment alignment = TextAlignment.Left, int strictlyAlignLeft = 0, Color defaultColor = default)
+            int x, int x1, ref int y, int height, TextAlignment alignment = TextAlignment.Left, int strictlyAlignLeft = 0, Color defaultColor = default, TRImageAlignment ImageVerticalAlignment = TRImageAlignment.Top)
         {
             if (s == null)
                 return;
@@ -396,6 +397,7 @@ namespace WzComparerR2.CharaSimControl
                 r.FontColorTable = fontColorTable;
                 r.FontTable = fontTable;
                 r.ImageTable = imageTable;
+                r.ImageVerticalAlignment = ImageVerticalAlignment;
                 r.StrictlyAlignLeft = strictlyAlignLeft;
                 r.DrawString(g, s, font, x, x1, ref y, height, alignment, defaultColor);
             }
@@ -680,9 +682,9 @@ namespace WzComparerR2.CharaSimControl
             }
 
             //测试y轴大小
-            int offsetY = wce.Min(bmp => bmp.OpOrigin.Y);
-            int height = wce.Max(bmp => bmp.Rectangle.Bottom);
             bool aniNameTag = resNode.FindNodeByPath("aniNameTag").GetValueEx(false);
+            int offsetY = aniNameTag ? 0 : wce.Min(bmp => bmp.OpOrigin.Y);
+            int height = aniNameTag ? 0 :wce.Max(bmp => bmp.Rectangle.Bottom);
 
             //测试宽度
             var font = GearGraphics.ItemDetailFont2;
@@ -737,33 +739,37 @@ namespace WzComparerR2.CharaSimControl
             }
             else // ani mode
             {
-                bool mixedAniMode = wce[1].Bitmap != null && (wce[1].Bitmap.Width > 1 || wce[1].Bitmap.Height > 1);
+                bool mixedAniMode = wce[1].Bitmap != null && (wce[1].Bitmap.Width > 1 || wce[1].Bitmap.Height > 1)
+                    || aniNameTag;
 
                 offsetY = Math.Min((!aniNameTag ? offsetY : 0), ani0.OpOrigin.Y);
                 height = Math.Max((!aniNameTag ? height : 0), ani0.Rectangle.Bottom);
 
-                int bgWidth = mixedAniMode || aniNameTag ? wce[1].Bitmap.Width : nameWidth;
+                int bgWidth = mixedAniMode ? wce[1].Bitmap.Width : nameWidth;
                 int left = center - bgWidth / 2;
                 int right = left + bgWidth;
                 int nameLeft = center - nameWidth / 2;
 
                 picH -= offsetY;
 
-                if (mixedAniMode || aniNameTag)
+                int shiftX = aniNameTag ? 0 : wce[1].Origin.X;
+                int shiftY = aniNameTag ? 0 : wce[1].Origin.Y;
+
+                if (mixedAniMode)
                 {
                     // draw legay center
                     // Note: item 1143360 (MILESTONE) does not render well, ignore it.
                     if (!aniNameTag) g.DrawImage(wce[1].Bitmap, left - wce[1].Origin.X, picH - wce[1].Origin.Y);
                     // draw ani0 based on bg center position
-                    g.DrawImage(ani0.Bitmap, left - (!aniNameTag ? wce[1].Origin.X : 0) - ani0.Origin.X, picH - (!aniNameTag ? wce[1].Origin.Y : 0) - ani0.Origin.Y);
+                    g.DrawImage(ani0.Bitmap, left - shiftX - ani0.Origin.X, picH - shiftY - ani0.Origin.Y);
                     if (!string.IsNullOrEmpty(tagName)) // draw name
                     {
                         using var brush = new SolidBrush(color);
                         // offsetX with bg for better alignment
-                        g.DrawString(tagName, font, brush, nameLeft - (!aniNameTag ? wce[1].Origin.X : 0), picH, fmt);
+                        g.DrawString(tagName, font, brush, nameLeft - shiftX, picH, fmt);
                     }
 
-                    rectResult.X = left - (!aniNameTag ? wce[1].Origin.X : 0) - ani0.Origin.X;
+                    rectResult.X = left - shiftX - ani0.Origin.X;
                     rectResult.Width = ani0.Bitmap.Width;
                 }
                 else
@@ -1035,6 +1041,7 @@ namespace WzComparerR2.CharaSimControl
             public IDictionary<string, Color> FontColorTable { get; set; }
             public IDictionary<string, Font> FontTable { get; set; }
             public IDictionary<string, Bitmap> ImageTable { get; set; }
+            public TRImageAlignment ImageVerticalAlignment { get; set; }
 
             const int MAX_RANGES = 32;
             StringFormat fmt;
@@ -1284,7 +1291,7 @@ namespace WzComparerR2.CharaSimControl
                 return rects;
             }
 
-            protected override void Flush(StringBuilder sb, int startIndex, int length, int x, int y, string colorID, string fontID, string imageID, int imageHeight)
+            protected override void Flush(StringBuilder sb, int startIndex, int length, int x, int y, string colorID, string fontID, string imageID, int imageWidth, int imageHeight)
             {
                 string content = sb.ToString(startIndex, length);
                 colorID = colorID ?? string.Empty;
@@ -1298,15 +1305,27 @@ namespace WzComparerR2.CharaSimControl
                     switch (colorID)
                     {
                         case "c": color = GearGraphics.OrangeBrushColor; break;
-                        case "$g": color = GearGraphics.gearCyanColor; break;
+                        case "$g": color = GearGraphics.SkillHighlightColor; break;
                         default: color = this.defaultColor; break;
                     }
                 }
                 font = GetFont(fontID);
                 if ((this.ImageTable?.TryGetValue(imageID, out bmp) ?? false) && bmp != null) // ImageTable로 전달된 이미지 그리기
                 {
-                    var dx = Math.Max((32 - bmp.Width) / 2, 0);
-                    var dy = -Math.Max(Math.Min(bmp.Height, imageHeight) - font.Height, 0);
+                    var dx = Math.Max((imageWidth - bmp.Width) / 2, 0);
+                    int dy = font.Height - Math.Min(bmp.Height, imageHeight);
+                    switch (this.ImageVerticalAlignment)
+                    {
+                        case TRImageAlignment.Top:
+                            dy = Math.Min(dy, 0);
+                            break;
+                        case TRImageAlignment.Center:
+                            dy = dy / 2 - 1;
+                            break;
+                        case TRImageAlignment.Bottom:
+                            dy = Math.Max(dy, 0);
+                            break;
+                    }
                     g.DrawImage(bmp, this.drawX + x + dx, y + dy);
                     return;
                 }
@@ -1341,6 +1360,13 @@ namespace WzComparerR2.CharaSimControl
                 if (fmt != null)
                     fmt.Dispose();
             }
+        }
+
+        public enum TRImageAlignment
+        {
+            Top,
+            Center,
+            Bottom,
         }
     }
 }

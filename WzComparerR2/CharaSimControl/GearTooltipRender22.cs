@@ -227,14 +227,10 @@ namespace WzComparerR2.CharaSimControl
             picH = 10;
 
             // 스타포스 별
-            int maxStar = Math.Max(Gear.GetMaxStar(CharaSimLoader.LoadedAstraSubWeapons), Gear.Star);
+            int maxStar = Math.Max(Gear.GetMaxStar(CharaSimLoader.LoadedDestinyWeapons, CharaSimLoader.LoadedAstraSubWeapons), Gear.Star);
             if (maxStar == 30 && this.MaxStar25)
             {
                 maxStar -= 5;
-            }
-            if (maxStar >= 25 && Gear.IsGenesisWeapon)
-            {
-                maxStar = 22;
             }
             if (!Gear.GetBooleanValue(GearPropType.blockUpgradeStarforce))
             {
@@ -460,71 +456,74 @@ namespace WzComparerR2.CharaSimControl
             picH += 18;
 
             // 착용 직업
-            string reqJobString = ItemStringHelper.GetExtraJobReqString(Gear.type, Gear.ReqSpecJobs.Count > 0, CharaSimLoader.LoadedAstraSubWeapons, Gear.ItemID);
-            if (reqJobString == null && Gear.Props.TryGetValue(GearPropType.reqSpecJob, out value))
+            if (Gear.type != GearType.equipBag)
             {
-                reqJobString = ItemStringHelper.GetExtraJobReqString(value);
-            }
-            if (reqJobString == null && Gear.ReqSpecJobs.Count > 0)
-            {
-                // apply req order fix for CMS only
-                int[] specJobsList1 = new[] { 2, 22, 12, 32, 172 };
-                if (new HashSet<int>(specJobsList1).SetEquals(Gear.ReqSpecJobs))
+                string reqJobString = ItemStringHelper.GetExtraJobReqString(Gear.type, Gear.ReqSpecJobs.Count > 0, CharaSimLoader.LoadedAstraSubWeapons, Gear.ItemID);
+                if (reqJobString == null && Gear.Props.TryGetValue(GearPropType.reqSpecJob, out value))
                 {
-                    reqJobString = JoinStringWithNewline(g, ", ", ItemStringHelper.GetExtraJobReqStringList(specJobsList1), 210);
+                    reqJobString = ItemStringHelper.GetExtraJobReqString(value);
                 }
-                else
+                if (reqJobString == null && Gear.ReqSpecJobs.Count > 0)
                 {
-                    reqJobString = JoinStringWithNewline(g, ", ", ItemStringHelper.GetExtraJobReqStringList(Gear.ReqSpecJobs, isMsnClient), 210);
+                    // apply req order fix for CMS only
+                    int[] specJobsList1 = new[] { 2, 22, 12, 32, 172 };
+                    if (new HashSet<int>(specJobsList1).SetEquals(Gear.ReqSpecJobs))
+                    {
+                        reqJobString = JoinStringWithNewline(g, ", ", ItemStringHelper.GetExtraJobReqStringList(specJobsList1), 210);
+                    }
+                    else
+                    {
+                        reqJobString = JoinStringWithNewline(g, ", ", ItemStringHelper.GetExtraJobReqStringList(Gear.ReqSpecJobs, isMsnClient), 210);
+                    }
                 }
-            }
-            if (reqJobString == null)
-            {
-                List<string> reqJobList = new List<string>();
-                Gear.Props.TryGetValue(GearPropType.reqJob, out int reqJob);
-                switch (reqJob)
+                if (reqJobString == null)
                 {
-                    case -1:
-                        reqJobString = "초보자";
-                        break;
-                    case 0:
-                        reqJobString = "공용";
-                        break;
-                    default:
-                        for (int i = 0; i < 5; i++)
-                        {
-                            if ((reqJob & (1 << i)) != 0)
+                    List<string> reqJobList = new List<string>();
+                    Gear.Props.TryGetValue(GearPropType.reqJob, out int reqJob);
+                    switch (reqJob)
+                    {
+                        case -1:
+                            reqJobString = "초보자";
+                            break;
+                        case 0:
+                            reqJobString = "공용";
+                            break;
+                        default:
+                            for (int i = 0; i < 5; i++)
                             {
-                                switch (i)
+                                if ((reqJob & (1 << i)) != 0)
                                 {
-                                    case 0:
-                                        reqJobList.Add("전사");
-                                        break;
-                                    case 1:
-                                        reqJobList.Add("마법사");
-                                        break;
-                                    case 2:
-                                        reqJobList.Add("궁수");
-                                        break;
-                                    case 3:
-                                        reqJobList.Add("도적");
-                                        break;
-                                    case 4:
-                                        reqJobList.Add("해적");
-                                        break;
+                                    switch (i)
+                                    {
+                                        case 0:
+                                            reqJobList.Add("전사");
+                                            break;
+                                        case 1:
+                                            reqJobList.Add("마법사");
+                                            break;
+                                        case 2:
+                                            reqJobList.Add("궁수");
+                                            break;
+                                        case 3:
+                                            reqJobList.Add("도적");
+                                            break;
+                                        case 4:
+                                            reqJobList.Add("해적");
+                                            break;
+                                    }
                                 }
                             }
-                        }
-                        break;
-                }
+                            break;
+                    }
 
-                if (reqJobList.Count > 0)
-                {
-                    reqJobString = string.Join(", ", reqJobList);
+                    if (reqJobList.Count > 0)
+                    {
+                        reqJobString = string.Join(", ", reqJobList);
+                    }
                 }
+                TextRenderer.DrawText(g, "착용 직업", GearGraphics.EquipMDMoris9Font, new Point(15, picH), ((SolidBrush)GearGraphics.Equip22BrushGray).Color, TextFormatFlags.NoPadding);
+                GearGraphics.DrawString(g, (string.IsNullOrEmpty(reqJobString) ? "공용" : reqJobString).Replace("착용", "").Replace("가능", "").Trim(), GearGraphics.EquipMDMoris9Font, equip22ColorTable, 100, 308, ref picH, 16);
             }
-            TextRenderer.DrawText(g, "착용 직업", GearGraphics.EquipMDMoris9Font, new Point(15, picH), ((SolidBrush)GearGraphics.Equip22BrushGray).Color, TextFormatFlags.NoPadding);
-            GearGraphics.DrawString(g, (string.IsNullOrEmpty(reqJobString) ? "공용" : reqJobString).Replace("착용", "").Replace("가능", "").Trim(), GearGraphics.EquipMDMoris9Font, equip22ColorTable, 100, 308, ref picH, 16);
 
             // 요구 레벨
             this.Gear.Props.TryGetValue(GearPropType.reqLevel, out value2);
@@ -711,18 +710,16 @@ namespace WzComparerR2.CharaSimControl
 
                 if (Gear.IsGenesisWeapon)
                 {
-                    int destinySkill = 1241 * (Gear.IsDestinyWeapon ? 1 : 0);
-
-                    foreach (var skillID in new[] { 80002632, 80002633 })
+                    foreach (var skillID in Gear.GetGenesisSkillList(CharaSimLoader.LoadedDestinyWeapons))
                     {
                         string skillName;
-                        if (this.StringLinker?.StringSkill.TryGetValue(skillID + destinySkill, out var sr2) ?? false && sr2.Name != null)
+                        if (this.StringLinker?.StringSkill.TryGetValue(skillID, out var sr2) ?? false && sr2.Name != null)
                         {
                             skillName = sr2.Name;
                         }
                         else
                         {
-                            skillName = (skillID + destinySkill).ToString();
+                            skillName = skillID.ToString();
                         }
                         skillNames.Add(skillName);
                     }
@@ -1332,7 +1329,12 @@ namespace WzComparerR2.CharaSimControl
                     enhance_potential = 0;
                     enhance_addiPotential = 0;
                 }
-                if (Gear.IsDestinyWeapon)
+                if (Gear.IsDestinyWeapon(CharaSimLoader.LoadedDestinyWeapons, 2))
+                {
+                    enhance_potential = 12;
+                    enhance_addiPotential = 12;
+                }
+                else if (Gear.IsDestinyWeapon(CharaSimLoader.LoadedDestinyWeapons, 1))
                 {
                     enhance_potential = 11;
                     enhance_addiPotential = 11;
@@ -1456,6 +1458,11 @@ namespace WzComparerR2.CharaSimControl
                         g.DrawImage(GetPotentialGradeIcon(GearGrade.C), 15, picH);
                         GearGraphics.DrawString(g, text, GearGraphics.EquipMDMoris9Font, itemPotentialColorTable, 30, 305, ref picH, 16);
                         break;
+                    case 12:
+                        text = $"#${GetPotentialColorTag(GearGrade.C)}잠재능력 : 데스티니 무기 옵션 전승#";
+                        g.DrawImage(GetPotentialGradeIcon(GearGrade.C), 15, picH);
+                        GearGraphics.DrawString(g, text, GearGraphics.EquipMDMoris9Font, itemPotentialColorTable, 30, 305, ref picH, 16);
+                        break;
                 }
 
                 switch (enhance_addiPotential)
@@ -1500,6 +1507,11 @@ namespace WzComparerR2.CharaSimControl
                         break;
                     case 11:
                         text = $"#${GetPotentialColorTag(GearGrade.C)}에디셔널 잠재능력 : 제네시스 무기 옵션 상향 전승#";
+                        g.DrawImage(GetPotentialGradeIcon(GearGrade.C), 15, picH);
+                        GearGraphics.DrawString(g, text, GearGraphics.EquipMDMoris9Font, itemPotentialColorTable, 30, 305, ref picH, 16);
+                        break;
+                    case 12:
+                        text = $"#${GetPotentialColorTag(GearGrade.C)}에디셔널 잠재능력 : 데스티니 무기 옵션 전승#";
                         g.DrawImage(GetPotentialGradeIcon(GearGrade.C), 15, picH);
                         GearGraphics.DrawString(g, text, GearGraphics.EquipMDMoris9Font, itemPotentialColorTable, 30, 305, ref picH, 16);
                         break;
