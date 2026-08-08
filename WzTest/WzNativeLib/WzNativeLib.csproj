@@ -5,6 +5,11 @@
     <TargetFramework>net8.0</TargetFramework>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <PublishAot>true</PublishAot>
+    <!-- Visual Studio 게시 마법사(GUI)는 NativeLib을 지정할 방법이 없어서,
+         CLI의 -p:NativeLib=Shared 없이 게시하면 C 함수 export가 안 되는
+         DLL이 만들어진다. 어떤 방식으로 게시하든 항상 적용되도록 여기 고정. -->
+    <NativeLib>Shared</NativeLib>
+    <SelfContained>true</SelfContained>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
