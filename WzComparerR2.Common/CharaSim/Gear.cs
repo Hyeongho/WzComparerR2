@@ -753,6 +753,7 @@ namespace WzComparerR2.CharaSim
             { 45, GearType.fanTassel },
 
             { 50, GearType.kodachi2 },
+            { 51, GearType.whistle2 },
             { 52, GearType.boxingSky },
 
             { 53, GearType.compass },
@@ -1381,6 +1382,15 @@ namespace WzComparerR2.CharaSim
             {
                 gear.Icon = BitmapOrigin.CreateFromNode(findNode(@"Item\Install\0380.img\03801577\info\icon", wzf), findNode, wzf);
                 gear.IconRaw = BitmapOrigin.CreateFromNode(findNode(@"Item\Install\0380.img\03801577\info\iconRaw", wzf), findNode, wzf);
+            }
+
+            if (gear.Icon.Bitmap == null)
+            {
+                gear.Icon = new BitmapOrigin(gear.IconRaw.Bitmap, gear.IconRaw.Origin);
+            }
+            else if (gear.IconRaw.Bitmap == null)
+            {
+                gear.IconRaw = new BitmapOrigin(gear.Icon.Bitmap, gear.Icon.Origin);
             }
 
             /*

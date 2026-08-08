@@ -85,7 +85,7 @@ namespace WzComparerR2.MapRender
             }
         }
         public Action<string> SoundEffPlayer;
-        public Action<LifeItem> LoadMobResource;
+        public Action<SceneItem> LoadSceneItemResource;
 
         private readonly IRandom random;
         private bool enableMobMovement;
@@ -722,6 +722,10 @@ namespace WzComparerR2.MapRender
                         {
                             PreloadResource(resLoader, (ParticleItem)item);
                         }
+                        else if (item is SkillItem)
+                        {
+                            PreloadResource(resLoader, (SkillItem)item);
+                        }
                     }
                 }
 
@@ -755,6 +759,11 @@ namespace WzComparerR2.MapRender
 
         private void PreloadResource(ResourceLoader resLoader, ObjItem obj)
         {
+            if (obj.Hide)
+            {
+                obj.View = new ObjItem.ItemView(obj);
+                return;
+            }
             string path = $@"Map\Obj\{obj.OS}.img\{obj.L0}\{obj.L1}\{obj.L2}";
             var aniItem = resLoader.LoadAnimationData(path);
             obj.View = new ObjItem.ItemView(obj)
@@ -1056,6 +1065,15 @@ namespace WzComparerR2.MapRender
             }
         }
 
+        private void PreloadResource(ResourceLoader resLoader, SkillItem skill)
+        {
+            var aniItem = resLoader.LoadAnimationData(skill.AniNode);
+            skill.View = new SkillItem.ItemView()
+            {
+                Animator = CreateAnimator(aniItem),
+            };
+        }
+
         public void LoadResource(ResourceLoader resLoader, SceneItem item)
         {
             if (item is BackItem)
@@ -1089,6 +1107,10 @@ namespace WzComparerR2.MapRender
             else if (item is ParticleItem)
             {
                 PreloadResource(resLoader, (ParticleItem)item);
+            }
+            else if (item is SkillItem)
+            {
+                PreloadResource(resLoader, (SkillItem)item);
             }
         }
 
@@ -1507,7 +1529,7 @@ namespace WzComparerR2.MapRender
                 mob.Controller = new BehaviorController(mob, FootholdManager, movementEnabled: this.EnableMobMovement, summoned: true, playRegenMotion: playRegenMotion);
                 mob.Controller.InitRandom(this.random);
 
-                LoadMobResource?.Invoke(mob);
+                LoadSceneItemResource?.Invoke(mob);
                 RequestAddToLayer(mob, mob.Controller.CurLayerFoothold);
                 return true;
             }
@@ -1531,6 +1553,35 @@ namespace WzComparerR2.MapRender
             }
         }
 
+        public bool SummonSkill(string name, int id, int x, int y, int l, int t, int r, int b, string aniPath, bool flip)
+        {
+            string img;
+            if (id >= 80000000 && id < 90000000)
+            {
+                img = (id / 100).ToString();
+            }
+            else
+            {
+                img = (id / 10000).ToString();
+            }
+            var path = $@"Skill\{img}.img\skill\{id:D7}\{aniPath}";
+            var skillNode = PluginManager.FindWz(path);
+            var zindex = Scene.Fly.Skill.Slots.Count > 0 ? Scene.Fly.Skill.Slots.Max(s => s.Index) + 1 : 0;
+            SkillItem skill = SkillItem.Create(name, id, x, y, l, t, r, b, index: zindex, flip, skillNode);
+            if (skillNode != null && skill != null)
+            {
+                LoadSceneItemResource?.Invoke(skill);
+                RequestAddToLayer(skill);
+                return true;
+            }
+            else return false;
+        }
+
+        public void UnsummonSkill(SkillItem skill)
+        {
+            RequestRemoveFromLayer(skill);
+        }
+
         private void RequestMoveLayer(LifeItem lifeItem, int prev, int next)
         {
             if (lifeItem == null || prev == 0 || next == 0 || prev == next) return;
@@ -1545,11 +1596,18 @@ namespace WzComparerR2.MapRender
             addToLayerQueue.Add(new Tuple<SceneItem, int>(lifeItem, foothold));
         }
 
-        private void RequestRemoveFromLayer(LifeItem lifeItem)
+        private void RequestAddToLayer(SkillItem skillItem)
         {
-            if (lifeItem == null) return;
+            if (skillItem == null) return;
 
-            removeFromLayerQueue.Add(lifeItem);
+            addToLayerQueue.Add(new Tuple<SceneItem, int>(skillItem, 0));
+        }
+
+        private void RequestRemoveFromLayer(SceneItem sceneItem)
+        {
+            if (sceneItem == null) return;
+
+            removeFromLayerQueue.Add(sceneItem);
         }
 
         public void ExecuteQueue()
@@ -1607,14 +1665,21 @@ namespace WzComparerR2.MapRender
             {
                 SceneItem target = task.Item1;
                 int foothold = task.Item2;
-                ContainerNode<FootholdItem> fhNode;
-                if (foothold != -1 && (fhNode = FindFootholdByID(foothold)) != null)
+                if (target is LifeItem life)
                 {
-                    fhNode.Slots.Add(target);
+                    ContainerNode<FootholdItem> fhNode;
+                    if (foothold != -1 && (fhNode = FindFootholdByID(foothold)) != null)
+                    {
+                        fhNode.Slots.Add(target);
+                    }
+                    else
+                    {
+                        Scene.Fly.Sky.Slots.Add(target);
+                    }
                 }
-                else
+                else if (target is SkillItem skill)
                 {
-                    Scene.Fly.Sky.Slots.Add(target);
+                    Scene.Fly.Skill.Slots.Add(target);
                 }
             }
             addToLayerQueue.Clear();
@@ -1624,12 +1689,19 @@ namespace WzComparerR2.MapRender
         {
             foreach (var target in removeFromLayerQueue)
             {
-                foreach (var fhNode in this.Scene.Layers.Nodes.OfType<LayerNode>()
-                .SelectMany(layerNode => layerNode.Foothold.Nodes).OfType<ContainerNode<FootholdItem>>())
+                if (target is LifeItem life)
                 {
-                    if (fhNode.Slots.Remove(target)) break;
+                    foreach (var fhNode in this.Scene.Layers.Nodes.OfType<LayerNode>()
+                .SelectMany(layerNode => layerNode.Foothold.Nodes).OfType<ContainerNode<FootholdItem>>())
+                    {
+                        if (fhNode.Slots.Remove(target)) break;
+                    }
+                    Scene.Fly.Sky.Slots.Remove(target);
                 }
-                Scene.Fly.Sky.Slots.Remove(target);
+                else if (target is SkillItem skill)
+                {
+                    Scene.Fly.Skill.Slots.Remove(target);
+                }
             }
             removeFromLayerQueue.Clear();
         }
