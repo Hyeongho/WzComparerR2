@@ -11,6 +11,8 @@
 //     type  : 'I' (img) 또는 'D' (directory)
 //     name  : 노드 이름
 
+using System.Drawing;
+using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
 using System.Text;
 using WzComparerR2.WzLib;
@@ -36,46 +38,13 @@ public static unsafe class WzExports
 			string path = Marshal.PtrToStringUTF8(pathUtf8)
 						  ?? throw new ArgumentNullException("path");
 
-			var wz = new Wz_Structure();
-			string ext = Path.GetExtension(path);
-
-			if (string.Equals(ext, ".ms", StringComparison.OrdinalIgnoreCase) ||
-				string.Equals(ext, ".mn", StringComparison.OrdinalIgnoreCase))
-			{
-				wz.LoadMsFile(path);
-			}
-			else if (wz.IsKMST1125WzFormat(path))
-			{
-				wz.LoadKMST1125DataWz(path);
-
-				// Base.wz 옆 Packs 폴더의 .ms/.mn 파일도 로드 (MainForm.openWz 동일)
-				if (string.Equals(Path.GetFileName(path), "Base.wz", StringComparison.OrdinalIgnoreCase))
-				{
-					string? dataDir = Path.GetDirectoryName(Path.GetDirectoryName(path));
-					if (dataDir != null)
-					{
-						string packsDir = Path.Combine(dataDir, "Packs");
-						if (Directory.Exists(packsDir))
-						{
-							foreach (string msFile in Directory.GetFiles(packsDir, "*.ms")
-								.Concat(Directory.GetFiles(packsDir, "*.mn")))
-							{
-								wz.LoadMsFile(msFile);
-							}
-						}
-					}
-				}
-			}
-			else
-			{
-				wz.Load(path, true);
-			}
+			Wz_Node? rootNode = OpenWzPathAndGetRoot(path);
 
 			var sb = new StringBuilder(65536);
 			sb.AppendLine("OK");
 
-			if (wz.WzNode != null)
-				TraverseNode(wz.WzNode, -1, sb);
+			if (rootNode != null)
+				TraverseNode(rootNode, -1, sb);
 
 			return MarshalUtf8(sb.ToString());
 		}
@@ -170,15 +139,19 @@ public static unsafe class WzExports
 			else
 			{
 				// wzPath = WZ 파일 또는 폴더, imgPath = 내부 노드 경로 (백슬래시 구분)
-				var structure = new Wz_Structure();
-				Wz_Node? rootNode = null;
-
+				Wz_Node? root;
 				if (Directory.Exists(wzPath))
+				{
+					var structure = new Wz_Structure();
+					Wz_Node? rootNode = null;
 					structure.LoadWzFolder(wzPath, ref rootNode, false);
+					root = rootNode ?? structure.WzNode;
+				}
 				else
-					structure.Load(wzPath, false);
+				{
+					root = OpenWzPathAndGetRoot(wzPath);
+				}
 
-				Wz_Node? root = rootNode ?? structure.WzNode;
 				// FindNodeByPath(string, bool) → 내부에서 '\' 로 분리 (Wz_Node.cs:121)
 				Wz_Node? found = root?.FindNodeByPath(imgPath, false);
 				img = found?.Value as Wz_Image;
@@ -209,6 +182,79 @@ public static unsafe class WzExports
 		}
 	}
 
+	// ── wz_read_canvas ──────────────────────────────────────────────────────
+	// wzPathUtf8  : WZ 파일 경로 또는 WZ 폴더 경로 (wz_read_img와 동일)
+	// nodePathUtf8: IMG 내부 Canvas 노드까지의 백슬래시 구분 경로
+	//               (예: "Face.img\00020000\face\0")
+	// outWidth/outHeight: 디코딩된 이미지 크기 (실패 시 0)
+	// outLen      : 반환 바이트 수 = width*height*4 (실패 시 0)
+	// 반환        : BGRA8888(메모리상 B,G,R,A 순서) 픽셀 바이트 포인터
+	//               (wz_free로 해제), 실패 시 IntPtr.Zero
+	[UnmanagedCallersOnly(EntryPoint = "wz_read_canvas")]
+	public static IntPtr WzReadCanvas(IntPtr wzPathUtf8, IntPtr nodePathUtf8, int* outWidth, int* outHeight, int* outLen)
+	{
+		*outWidth = 0;
+		*outHeight = 0;
+		*outLen = 0;
+		try
+		{
+			string wzPath = Marshal.PtrToStringUTF8(wzPathUtf8) ?? throw new ArgumentNullException("wzPath");
+			string nodePath = Marshal.PtrToStringUTF8(nodePathUtf8) ?? throw new ArgumentNullException("nodePath");
+
+			Wz_Node? root;
+			if (Directory.Exists(wzPath))
+			{
+				var structure = new Wz_Structure();
+				Wz_Node? rootNode = null;
+				structure.LoadWzFolder(wzPath, ref rootNode, false);
+				root = rootNode ?? structure.WzNode;
+			}
+			else
+			{
+				root = OpenWzPathAndGetRoot(wzPath);
+			}
+
+			// extractImage: true — IMG 내부까지 자동으로 파고들며 프로퍼티를 추출한다.
+			Wz_Node? found = root?.FindNodeByPath(nodePath, true);
+
+			if (found?.Value is not Wz_Png png)
+				return IntPtr.Zero;
+
+			using Bitmap bmp = png.ExtractPng();
+			int width = bmp.Width;
+			int height = bmp.Height;
+			var rect = new Rectangle(0, 0, width, height);
+			BitmapData data = bmp.LockBits(rect, ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+			try
+			{
+				int rowBytes = width * 4;
+				int totalBytes = rowBytes * height;
+				IntPtr ptr = Marshal.AllocCoTaskMem(totalBytes);
+
+				// Stride가 rowBytes와 다를 수 있으므로(정렬 패딩) 줄 단위로 복사한다.
+				for (int y = 0; y < height; y++)
+				{
+					IntPtr srcRow = IntPtr.Add(data.Scan0, y * data.Stride);
+					IntPtr dstRow = IntPtr.Add(ptr, y * rowBytes);
+					Buffer.MemoryCopy((void*)srcRow, (void*)dstRow, rowBytes, rowBytes);
+				}
+
+				*outWidth = width;
+				*outHeight = height;
+				*outLen = totalBytes;
+				return ptr;
+			}
+			finally
+			{
+				bmp.UnlockBits(data);
+			}
+		}
+		catch
+		{
+			return IntPtr.Zero;
+		}
+	}
+
 	// ── wz_free ─────────────────────────────────────────────────────────────
 	// wz_open / wz_load_folder / wz_load_file / wz_read_img 가 반환한 포인터를 해제
 	[UnmanagedCallersOnly(EntryPoint = "wz_free")]
@@ -219,6 +265,57 @@ public static unsafe class WzExports
 	}
 
 	// ── 내부 헬퍼 ────────────────────────────────────────────────────────────
+
+	// wz_open의 파일 형식 자동 감지 로직(원래 여기에만 있었음)을 wz_read_img /
+	// wz_read_canvas도 공유하도록 추출한 헬퍼. 이게 없으면 저 두 함수는
+	// Base.wz(레거시 분할 구조든, KMST1125 Packs 병합 구조든)를 못 연다.
+	//   - *.ms / *.mn          → LoadMsFile
+	//   - KMST1125 Base.wz     → LoadKMST1125DataWz (+ Packs/*.ms 자동 로드)
+	//   - 그 외 *.wz(레거시 Base.wz 분할 구조 포함) → Load(path, useBaseWz: true)
+	private static Wz_Node? OpenWzPathAndGetRoot(string path)
+	{
+		string ext = Path.GetExtension(path);
+
+		if (string.Equals(ext, ".ms", StringComparison.OrdinalIgnoreCase) ||
+			string.Equals(ext, ".mn", StringComparison.OrdinalIgnoreCase))
+		{
+			var wz = new Wz_Structure();
+			wz.LoadMsFile(path);
+			return wz.WzNode;
+		}
+
+		var structure = new Wz_Structure();
+
+		if (structure.IsKMST1125WzFormat(path))
+		{
+			structure.LoadKMST1125DataWz(path);
+
+			// Base.wz 옆 Packs 폴더의 .ms/.mn 파일도 로드 (MainForm.openWz 동일)
+			if (string.Equals(Path.GetFileName(path), "Base.wz", StringComparison.OrdinalIgnoreCase))
+			{
+				string? dataDir = Path.GetDirectoryName(Path.GetDirectoryName(path));
+				if (dataDir != null)
+				{
+					string packsDir = Path.Combine(dataDir, "Packs");
+					if (Directory.Exists(packsDir))
+					{
+						foreach (string msFile in Directory.GetFiles(packsDir, "*.ms")
+							.Concat(Directory.GetFiles(packsDir, "*.mn")))
+						{
+							structure.LoadMsFile(msFile);
+						}
+					}
+				}
+			}
+
+			return structure.WzNode;
+		}
+
+		// useBaseWz: true — 레거시 Base.wz 분할 파일 구조(디렉터리 항목이
+		// 다른 .wz 파일을 참조)도 올바르게 해석한다.
+		structure.Load(path, true);
+		return structure.WzNode;
+	}
 
 	private static void TraverseNode(Wz_Node node, int depth, StringBuilder sb)
 	{
