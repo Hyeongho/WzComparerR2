@@ -11,6 +11,8 @@
 //     type  : 'I' (img) 또는 'D' (directory)
 //     name  : 노드 이름
 
+using System.Drawing;
+using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
 using System.Text;
 using WzComparerR2.WzLib;
@@ -202,6 +204,75 @@ public static unsafe class WzExports
 			Marshal.Copy(bytes, 0, ptr, read);
 			*outLen = read;
 			return ptr;
+		}
+		catch
+		{
+			return IntPtr.Zero;
+		}
+	}
+
+	// ── wz_read_canvas ──────────────────────────────────────────────────────
+	// wzPathUtf8  : WZ 파일 경로 또는 WZ 폴더 경로 (wz_read_img와 동일)
+	// nodePathUtf8: IMG 내부 Canvas 노드까지의 백슬래시 구분 경로
+	//               (예: "Face.img\00020000\face\0")
+	// outWidth/outHeight: 디코딩된 이미지 크기 (실패 시 0)
+	// outLen      : 반환 바이트 수 = width*height*4 (실패 시 0)
+	// 반환        : BGRA8888(메모리상 B,G,R,A 순서) 픽셀 바이트 포인터
+	//               (wz_free로 해제), 실패 시 IntPtr.Zero
+	[UnmanagedCallersOnly(EntryPoint = "wz_read_canvas")]
+	public static IntPtr WzReadCanvas(IntPtr wzPathUtf8, IntPtr nodePathUtf8, int* outWidth, int* outHeight, int* outLen)
+	{
+		*outWidth = 0;
+		*outHeight = 0;
+		*outLen = 0;
+		try
+		{
+			string wzPath = Marshal.PtrToStringUTF8(wzPathUtf8) ?? throw new ArgumentNullException("wzPath");
+			string nodePath = Marshal.PtrToStringUTF8(nodePathUtf8) ?? throw new ArgumentNullException("nodePath");
+
+			var structure = new Wz_Structure();
+			Wz_Node? rootNode = null;
+
+			if (Directory.Exists(wzPath))
+				structure.LoadWzFolder(wzPath, ref rootNode, false);
+			else
+				structure.Load(wzPath, false);
+
+			Wz_Node? root = rootNode ?? structure.WzNode;
+			// extractImage: true — IMG 내부까지 자동으로 파고들며 프로퍼티를 추출한다.
+			Wz_Node? found = root?.FindNodeByPath(nodePath, true);
+
+			if (found?.Value is not Wz_Png png)
+				return IntPtr.Zero;
+
+			using Bitmap bmp = png.ExtractPng();
+			int width = bmp.Width;
+			int height = bmp.Height;
+			var rect = new Rectangle(0, 0, width, height);
+			BitmapData data = bmp.LockBits(rect, ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+			try
+			{
+				int rowBytes = width * 4;
+				int totalBytes = rowBytes * height;
+				IntPtr ptr = Marshal.AllocCoTaskMem(totalBytes);
+
+				// Stride가 rowBytes와 다를 수 있으므로(정렬 패딩) 줄 단위로 복사한다.
+				for (int y = 0; y < height; y++)
+				{
+					IntPtr srcRow = IntPtr.Add(data.Scan0, y * data.Stride);
+					IntPtr dstRow = IntPtr.Add(ptr, y * rowBytes);
+					Buffer.MemoryCopy((void*)srcRow, (void*)dstRow, rowBytes, rowBytes);
+				}
+
+				*outWidth = width;
+				*outHeight = height;
+				*outLen = totalBytes;
+				return ptr;
+			}
+			finally
+			{
+				bmp.UnlockBits(data);
+			}
 		}
 		catch
 		{

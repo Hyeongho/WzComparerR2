@@ -1,15 +1,17 @@
 #pragma execution_character_set("utf-8")
-// wz_test.cpp — WzNativeLib.dll 로더 + 트리 덤프 + IMG 추출 테스트
+// wz_test.cpp — WzNativeLib.dll 로더 + 트리 덤프 + IMG/Canvas 추출 테스트
 //
 // 빌드 (MSVC):
 //   cl /EHsc /std:c++17 /utf-8 wz_test.cpp
 //
 // 실행:
-//   wz_test.exe  <WzNativeLib.dll 경로>  <WZ 파일/폴더 경로>  [IMG 이름]  [저장 경로]
+//   wz_test.exe  <WzNativeLib.dll 경로>  <WZ 파일/폴더 경로>  [IMG 이름]  [저장 경로]  [Canvas 노드 경로]  [BMP 저장 경로]
 //
 // 예시:
 //   wz_test.exe WzNativeLib.dll "C:\Maple\Data\Skill.wz"
 //   wz_test.exe WzNativeLib.dll "C:\Maple\Data\Skill.wz" "DragonSkill.img" out.img
+//   (Canvas 하나를 디코딩해서 BMP로 저장 — IMG 원본 추출은 건너뛰려면 인자 3, 4를 빈 문자열 ""로 둔다)
+//   wz_test.exe WzNativeLib.dll "C:\Maple\Data\Character.wz" "" "" "00002000.img\face\0" canvas.bmp
 
 #include <windows.h>
 #include <iostream>
@@ -33,15 +35,23 @@ namespace WzDll
     using FnReadImg = const uint8_t*(*)(const char* wzPath,
                                         const char* imgPath,
                                         int*        outLen);
+    // wz_read_canvas: Canvas 노드를 BGRA8888 픽셀로 디코딩해서 반환
+    // (실패 시 nullptr, outWidth/outHeight/outLen=0)
+    using FnReadCanvas = const uint8_t*(*)(const char* wzPath,
+                                           const char* nodePath,
+                                           int*        outWidth,
+                                           int*        outHeight,
+                                           int*        outLen);
     // wz_free: 위 함수들이 반환한 포인터 해제
     using FnFree    = void(*)(const char* ptr);
 
-    static HMODULE    hDll      = nullptr;
-    static FnOpen     openWz    = nullptr;
-    static FnFolder   loadFolder = nullptr;
-    static FnFile     loadFile  = nullptr;
-    static FnReadImg  readImg   = nullptr;
-    static FnFree     freeResult = nullptr;
+    static HMODULE      hDll        = nullptr;
+    static FnOpen       openWz      = nullptr;
+    static FnFolder     loadFolder  = nullptr;
+    static FnFile       loadFile    = nullptr;
+    static FnReadImg    readImg     = nullptr;
+    static FnReadCanvas readCanvas  = nullptr;
+    static FnFree       freeResult  = nullptr;
 
     static bool tryLoad(const std::string& dllPath)
     {
@@ -52,11 +62,12 @@ namespace WzDll
             return false;
         }
 
-        openWz     = (FnOpen)    GetProcAddress(hDll, "wz_open");
-        loadFolder = (FnFolder)  GetProcAddress(hDll, "wz_load_folder");
-        loadFile   = (FnFile)    GetProcAddress(hDll, "wz_load_file");
-        readImg    = (FnReadImg) GetProcAddress(hDll, "wz_read_img");
-        freeResult = (FnFree)    GetProcAddress(hDll, "wz_free");
+        openWz     = (FnOpen)       GetProcAddress(hDll, "wz_open");
+        loadFolder = (FnFolder)     GetProcAddress(hDll, "wz_load_folder");
+        loadFile   = (FnFile)       GetProcAddress(hDll, "wz_load_file");
+        readImg    = (FnReadImg)    GetProcAddress(hDll, "wz_read_img");
+        readCanvas = (FnReadCanvas) GetProcAddress(hDll, "wz_read_canvas");
+        freeResult = (FnFree)       GetProcAddress(hDll, "wz_free");
 
         // 필수 함수 확인
         const char* missing = nullptr;
@@ -73,9 +84,11 @@ namespace WzDll
             return false;
         }
 
-        // wz_read_img는 선택적 (구 DLL 호환)
+        // wz_read_img / wz_read_canvas는 선택적 (구 DLL 호환)
         if (!readImg)
             std::cerr << "[WzDll] wz_read_img 없음 — IMG 추출 불가 (DLL 재빌드 필요)\n";
+        if (!readCanvas)
+            std::cerr << "[WzDll] wz_read_canvas 없음 — Canvas 디코딩 불가 (DLL 재빌드 필요)\n";
 
         return true;
     }
@@ -164,6 +177,96 @@ static bool extractImgToFile(const std::string& wzPath,
     return true;
 }
 
+// ── Canvas 디코딩 + BMP 저장 ────────────────────────────────────────────────
+// wz_read_canvas가 돌려주는 BGRA8888(메모리상 B,G,R,A) 픽셀을 32bpp 무압축
+// BMP로 저장한다 — 별도 이미지 라이브러리 없이 Windows 이미지 뷰어로 바로
+// 디코딩 결과를 눈으로 확인하기 위한 최소 구현.
+#pragma pack(push, 1)
+struct BmpFileHeader
+{
+    uint16_t Type = 0x4D42; // "BM"
+    uint32_t FileSize = 0;
+    uint16_t Reserved1 = 0;
+    uint16_t Reserved2 = 0;
+    uint32_t PixelDataOffset = 0;
+};
+
+struct BmpInfoHeader
+{
+    uint32_t HeaderSize = 40;
+    int32_t  Width = 0;
+    int32_t  Height = 0; // 양수 = bottom-up
+    uint16_t Planes = 1;
+    uint16_t BitsPerPixel = 32;
+    uint32_t Compression = 0; // BI_RGB
+    uint32_t ImageSize = 0;
+    int32_t  XPixelsPerMeter = 2835;
+    int32_t  YPixelsPerMeter = 2835;
+    uint32_t ColorsUsed = 0;
+    uint32_t ColorsImportant = 0;
+};
+#pragma pack(pop)
+
+static bool saveBgraAsBmp(const std::string& outPath, const uint8_t* pixels, int width, int height)
+{
+    std::ofstream ofs(outPath, std::ios::binary);
+    if (!ofs)
+    {
+        std::cerr << "[Canvas] BMP 파일 쓰기 실패: " << outPath << "\n";
+        return false;
+    }
+
+    const uint32_t rowBytes = (uint32_t)width * 4;
+    const uint32_t pixelDataSize = rowBytes * (uint32_t)height;
+
+    BmpFileHeader fileHeader;
+    fileHeader.PixelDataOffset = sizeof(BmpFileHeader) + sizeof(BmpInfoHeader);
+    fileHeader.FileSize = fileHeader.PixelDataOffset + pixelDataSize;
+
+    BmpInfoHeader infoHeader;
+    infoHeader.Width = width;
+    infoHeader.Height = height; // bottom-up 이므로 아래에서 줄 순서를 뒤집어 쓴다
+    infoHeader.ImageSize = pixelDataSize;
+
+    ofs.write(reinterpret_cast<const char*>(&fileHeader), sizeof(fileHeader));
+    ofs.write(reinterpret_cast<const char*>(&infoHeader), sizeof(infoHeader));
+
+    // BMP는 bottom-up이 기본이라 마지막 줄부터 씀. wz_read_canvas가 돌려주는
+    // 픽셀은 top-down(줄 0 = 이미지 맨 위)이라 순서를 뒤집는다.
+    for (int y = height - 1; y >= 0; y--)
+    {
+        ofs.write(reinterpret_cast<const char*>(pixels + (size_t)y * rowBytes), rowBytes);
+    }
+
+    return true;
+}
+
+static bool extractCanvasToBmp(const std::string& wzPath,
+                                const std::string& nodePath,
+                                const std::string& outPath)
+{
+    if (!WzDll::readCanvas)
+    {
+        std::cerr << "[Canvas] wz_read_canvas 없음\n";
+        return false;
+    }
+
+    int width = 0, height = 0, len = 0;
+    const uint8_t* pixels = WzDll::readCanvas(wzPath.c_str(), nodePath.c_str(), &width, &height, &len);
+    if (!pixels || len == 0)
+    {
+        std::cerr << "[Canvas] 실패 — Canvas 노드를 찾을 수 없거나 디코딩 오류\n";
+        return false;
+    }
+
+    bool ok = saveBgraAsBmp(outPath, pixels, width, height);
+    WzDll::freeResult((const char*)pixels);
+
+    if (ok)
+        std::cout << "[Canvas] 완료: " << outPath << "  (" << width << "x" << height << ")\n";
+    return ok;
+}
+
 // ── main ────────────────────────────────────────────────────────────────────
 int main(int argc, char* argv[])
 {
@@ -174,12 +277,16 @@ int main(int argc, char* argv[])
     std::string wzPath  = R"(C:\Nexon\MapleStory\Data\Skill.wz)";
     std::string imgPath = "";   // IMG 추출할 경우 파일명 (예: "000.img")
     std::string outPath = "";   // 저장 경로 (비어 있으면 imgPath 이름으로 저장)
+    std::string canvasPath = ""; // Canvas 디코딩할 경우 노드 경로 (예: "000.img\\face\\0")
+    std::string bmpOutPath = ""; // BMP 저장 경로 (비어 있으면 "canvas.bmp")
 
     // 명령줄 인자가 있으면 덮어씀
     if (argc >= 2) dllPath = argv[1];
     if (argc >= 3) wzPath  = argv[2];
     if (argc >= 4) imgPath = argv[3];
     if (argc >= 5) outPath = argv[4];
+    if (argc >= 6) canvasPath = argv[5];
+    if (argc >= 7) bmpOutPath = argv[6];
 
     if (!WzDll::tryLoad(dllPath)) return 1;
 
@@ -205,6 +312,12 @@ int main(int argc, char* argv[])
         std::string savePath = outPath.empty() ? imgPath : outPath;
         // imgPath에 경로 구분자 포함 가능 (예: "Skill\Dragon.img")
         extractImgToFile(wzPath, imgPath, savePath);
+    }
+
+    // ── Canvas 디코딩 + BMP 저장 (인자가 있을 때)
+    if (!canvasPath.empty()) {
+        std::string bmpSavePath = bmpOutPath.empty() ? "canvas.bmp" : bmpOutPath;
+        extractCanvasToBmp(wzPath, canvasPath, bmpSavePath);
     }
 
     FreeLibrary(WzDll::hDll);
