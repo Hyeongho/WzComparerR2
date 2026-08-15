@@ -22,7 +22,17 @@ namespace WzComparerR2.PluginBase
 
 		public static Wz_Node? FindWz(string fullPath)
 		{
-			return CurrentRoot?.FindNodeByPath(fullPath);
+			if (CurrentRoot == null || string.IsNullOrEmpty(fullPath))
+				return null;
+
+			// _outlink/_inlink 값(예: "Character/Longcoat/_Canvas/01054087.img/info/icon")은
+			// '/'로 구분되는데, Wz_Node.FindNodeByPath(string, bool)는 '\\' 기준으로만
+			// 쪼갠다 — 정규화 안 하면 경로 전체가 노드 이름 하나로 취급돼 항상 null.
+			// extractImage: true도 필수 — 이게 없으면 "_Canvas\01054087.img" 경계에서
+			// Wz_Image.TryExtract()가 호출되지 않아 그 안쪽(info\icon 등)에 못 들어간다
+			// (wz_read_avatar의 Body/Head/Face/Hair 버그와 동일한 원인).
+			string normalized = fullPath.Replace('/', '\\');
+			return CurrentRoot.FindNodeByPath(normalized, true);
 		}
 
 		public static Wz_Node? FindWz(string fullPath, Wz_File? sourceWzFile)
