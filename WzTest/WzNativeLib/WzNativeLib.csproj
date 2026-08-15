@@ -29,4 +29,34 @@
     <ProjectReference Include="../../WzComparerR2.WzLib/WzComparerR2.WzLib.csproj" />
   </ItemGroup>
 
+  <!-- 아바타 합성 렌더링(wz_read_avatar)용 소스 링크.
+       WzComparerR2(WinForms GUI 앱)/WzComparerR2.Common 프로젝트를 통째로
+       참조하면 MonoGame/SharpDX/DevComponents.DotNetBar2 등이 딸려와서
+       Native AOT 퍼블리시와 안 맞는다 — 대신 실제로 필요한 자기완결적
+       소스 파일만 개별적으로 링크한다(전체 프로젝트 참조 아님).
+       PluginBase.PluginManager 의존은 실제 프로젝트를 링크하는 대신
+       PluginManagerShim.cs(우리가 직접 작성)로 대체했다. -->
+  <ItemGroup>
+    <!-- 아바타 합성 핵심 알고리즘 (본 트리/앵커 정렬/Z정렬/DrawFrame) -->
+    <Compile Include="../../WzComparerR2/AvatarCommon/AvatarCanvas.cs" Link="AvatarBridge/AvatarCanvas.cs" />
+    <Compile Include="../../WzComparerR2/AvatarCommon/Bone.cs" Link="AvatarBridge/Bone.cs" />
+    <Compile Include="../../WzComparerR2/AvatarCommon/Skin.cs" Link="AvatarBridge/Skin.cs" />
+    <Compile Include="../../WzComparerR2/AvatarCommon/AvatarPart.cs" Link="AvatarBridge/AvatarPart.cs" />
+    <Compile Include="../../WzComparerR2/AvatarCommon/AvatarFrameData.cs" Link="AvatarBridge/AvatarFrameData.cs" />
+    <Compile Include="../../WzComparerR2/AvatarCommon/ActionFrame.cs" Link="AvatarBridge/ActionFrame.cs" />
+    <!-- AvatarPart가 내부적으로 쓰는 아이템 ID→종류 분류 (순수 로직, GUI 의존 없음) -->
+    <Compile Include="../../WzComparerR2.Common/CharaSim/Gear.cs" Link="AvatarBridge/CharaSim/Gear.cs" />
+    <Compile Include="../../WzComparerR2.Common/CharaSim/GearType.cs" Link="AvatarBridge/CharaSim/GearType.cs" />
+    <Compile Include="../../WzComparerR2.Common/CharaSim/GearGrade.cs" Link="AvatarBridge/CharaSim/GearGrade.cs" />
+    <Compile Include="../../WzComparerR2.Common/CharaSim/GearLevelInfo.cs" Link="AvatarBridge/CharaSim/GearLevelInfo.cs" />
+    <Compile Include="../../WzComparerR2.Common/CharaSim/GearLimitedLabel.cs" Link="AvatarBridge/CharaSim/GearLimitedLabel.cs" />
+    <Compile Include="../../WzComparerR2.Common/CharaSim/GearPropType.cs" Link="AvatarBridge/CharaSim/GearPropType.cs" />
+    <Compile Include="../../WzComparerR2.Common/CharaSim/GearSealedInfo.cs" Link="AvatarBridge/CharaSim/GearSealedInfo.cs" />
+    <Compile Include="../../WzComparerR2.Common/CharaSim/GearState.cs" Link="AvatarBridge/CharaSim/GearState.cs" />
+    <Compile Include="../../WzComparerR2.Common/CharaSim/ItemBase.cs" Link="AvatarBridge/CharaSim/ItemBase.cs" />
+    <Compile Include="../../WzComparerR2.Common/CharaSim/ItemBaseType.cs" Link="AvatarBridge/CharaSim/ItemBaseType.cs" />
+    <!-- BitmapOrigin.CreateFromNode가 델리게이트 파라미터로 쓰는 타입 (델리게이트 선언 하나뿐) -->
+    <Compile Include="../../WzComparerR2.Common/GlobalFindNodeFunction.cs" Link="AvatarBridge/GlobalFindNodeFunction.cs" />
+  </ItemGroup>
+
 </Project>

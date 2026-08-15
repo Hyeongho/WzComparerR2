@@ -16,6 +16,8 @@ using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
 using System.Text;
 using WzComparerR2.WzLib;
+using WzComparerR2.AvatarCommon;
+using WzComparerR2.PluginBase;
 
 namespace WzNativeLib;
 
@@ -253,6 +255,200 @@ public static unsafe class WzExports
 		{
 			return IntPtr.Zero;
 		}
+	}
+
+	// ── wz_read_avatar ──────────────────────────────────────────────────────
+	// wzPathUtf8      : WZ 파일 경로 또는 WZ 폴더 경로 (Base.wz 등, wz_read_canvas와
+	//                   동일하게 KMST 병합/레거시 분할 포맷 자동 처리)
+	// loadoutSpecUtf8 : 세미콜론 구분 "슬롯=아이템ID" 목록
+	//                   (예: "body=2000000;face=20000;hair=30000;cap=1002140;coat=1040002")
+	//                   지원 슬롯: body / face / hair / 그 외(cap, coat, longcoat,
+	//                   pants, shoes, glove, weapon, cape, earrings,
+	//                   faceAccessory, eyeAccessory 등 — Character.wz 하위를
+	//                   재귀 탐색해서 찾음). 장착 안 한 슬롯은 그냥 생략.
+	// actionNameUtf8/frameIndex        : 몸 액션 이름("stand1" 등)과 프레임 번호
+	// emotionNameUtf8/emotionFrameIndex: 표정 이름("default" 등)과 프레임 번호
+	// outWidth/outHeight     : 합성된 이미지 크기 (실패 시 0)
+	// outOriginX/outOriginY  : 합성 결과의 그리기 기준점 —
+	//                          AvatarCanvas.DrawFrame()의 -rect.X/-rect.Y
+	// outLen                 : 반환 바이트 수 = width*height*4 (실패 시 0)
+	// 반환                   : BGRA8888 픽셀 바이트 포인터(wz_free로 해제),
+	//                          실패 시 IntPtr.Zero
+	[UnmanagedCallersOnly(EntryPoint = "wz_read_avatar")]
+	public static IntPtr WzReadAvatar(
+		IntPtr wzPathUtf8, IntPtr loadoutSpecUtf8,
+		IntPtr actionNameUtf8, int frameIndex,
+		IntPtr emotionNameUtf8, int emotionFrameIndex,
+		int* outWidth, int* outHeight, int* outOriginX, int* outOriginY, int* outLen)
+	{
+		*outWidth = 0;
+		*outHeight = 0;
+		*outOriginX = 0;
+		*outOriginY = 0;
+		*outLen = 0;
+		try
+		{
+			string wzPath = Marshal.PtrToStringUTF8(wzPathUtf8) ?? throw new ArgumentNullException("wzPath");
+			string loadoutSpec = Marshal.PtrToStringUTF8(loadoutSpecUtf8) ?? "";
+			string actionName = Marshal.PtrToStringUTF8(actionNameUtf8) ?? "stand1";
+			string emotionName = Marshal.PtrToStringUTF8(emotionNameUtf8) ?? "default";
+
+			Wz_Node? root;
+			if (Directory.Exists(wzPath))
+			{
+				var structure = new Wz_Structure();
+				Wz_Node? rootNode = null;
+				structure.LoadWzFolder(wzPath, ref rootNode, false);
+				root = rootNode ?? structure.WzNode;
+			}
+			else
+			{
+				root = OpenWzPathAndGetRoot(wzPath);
+			}
+
+			if (root == null)
+				return IntPtr.Zero;
+
+			// AvatarCommon 소스 내부의 PluginManager.FindWz 호출들(LoadActions/
+			// LoadEmotions/AvatarPart의 아이콘 로딩 등)이 이 루트를 쓰도록 연결.
+			// (PluginManagerShim.cs — 실제 GUI PluginBase 프로젝트는 링크하지 않음.)
+			PluginManager.CurrentRoot = root;
+
+			var canvas = new AvatarCanvas();
+			canvas.LoadZ(root.FindNodeByPath(@"Base\zmap.img"));
+			canvas.LoadActions();
+			canvas.LoadEmotions();
+
+			Wz_Node? characterRoot = root.FindNodeByPath("Character");
+
+			foreach (string entry in loadoutSpec.Split(';', StringSplitOptions.RemoveEmptyEntries))
+			{
+				int eq = entry.IndexOf('=');
+				if (eq < 0)
+					continue;
+
+				string slot = entry.Substring(0, eq).Trim();
+				if (!int.TryParse(entry.Substring(eq + 1).Trim(), out int id))
+					continue;
+
+				switch (slot)
+				{
+					case "body":
+					{
+						// AvatarCanvasManager.AddBodyFromSkin과 동일한 공식.
+						int skinID = (id % 2000) + 2000;
+						Wz_Node? bodyNode = root.FindNodeByPath($@"Character\0000{skinID:D4}.img")
+							?? root.FindNodeByPath(@"Character\00002000.img");
+						Wz_Node? headNode = root.FindNodeByPath($@"Character\0001{skinID:D4}.img")
+							?? root.FindNodeByPath(@"Character\00012000.img");
+						if (bodyNode != null) canvas.AddPart(bodyNode);
+						if (headNode != null) canvas.AddPart(headNode);
+						break;
+					}
+					case "face":
+					{
+						Wz_Node? node = root.FindNodeByPath($@"Character\Face\{id:D8}.img");
+						if (node != null)
+						{
+							canvas.AddPart(node);
+							canvas.LoadEmotions(); // 얼굴 파츠에 맞는 표정 목록을 다시 로드
+						}
+						break;
+					}
+					case "hair":
+					{
+						Wz_Node? node = root.FindNodeByPath($@"Character\Hair\{id:D8}.img");
+						if (node != null) canvas.AddPart(node);
+						break;
+					}
+					default:
+					{
+						// 나머지 장비 슬롯(cap/coat/longcoat/pants/shoes/glove/weapon/
+						// cape/earrings/faceAccessory/eyeAccessory 등) — 슬롯 이름 자체는
+						// AvatarCanvas.AddPart 내부의 Gear.GetGearType()이 아이템 ID로
+						// 알아서 판별하므로, 우리는 Character.wz 하위에서 {id:D8}.img만
+						// 찾아주면 된다(AvatarCanvasManager.FindNodeByGearID와 동일한 방식,
+						// _Canvas 폴더는 건너뜀).
+						Wz_Node? gearNode = FindGearNode(characterRoot, id);
+						if (gearNode != null) canvas.AddPart(gearNode);
+						break;
+					}
+				}
+			}
+
+			canvas.ActionName = actionName;
+			canvas.EmotionName = emotionName;
+
+			Bone bone = canvas.CreateFrame(frameIndex, emotionFrameIndex, 0, null);
+			if (bone == null)
+				return IntPtr.Zero;
+
+			BitmapOrigin bitmapOrigin = canvas.DrawFrame(bone);
+			if (bitmapOrigin.Bitmap == null)
+				return IntPtr.Zero;
+
+			using Bitmap bmp = bitmapOrigin.Bitmap;
+			int width = bmp.Width;
+			int height = bmp.Height;
+			var rect = new Rectangle(0, 0, width, height);
+			BitmapData data = bmp.LockBits(rect, ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+			try
+			{
+				int rowBytes = width * 4;
+				int totalBytes = rowBytes * height;
+				IntPtr ptr = Marshal.AllocCoTaskMem(totalBytes);
+
+				for (int y = 0; y < height; y++)
+				{
+					IntPtr srcRow = IntPtr.Add(data.Scan0, y * data.Stride);
+					IntPtr dstRow = IntPtr.Add(ptr, y * rowBytes);
+					Buffer.MemoryCopy((void*)srcRow, (void*)dstRow, rowBytes, rowBytes);
+				}
+
+				*outWidth = width;
+				*outHeight = height;
+				*outOriginX = bitmapOrigin.Origin.X;
+				*outOriginY = bitmapOrigin.Origin.Y;
+				*outLen = totalBytes;
+				return ptr;
+			}
+			finally
+			{
+				bmp.UnlockBits(data);
+			}
+		}
+		catch
+		{
+			return IntPtr.Zero;
+		}
+	}
+
+	// Character.wz 하위(카테고리 폴더 한 단계 + 그 안쪽 한 단계, _Canvas 폴더는
+	// 건너뜀)에서 "{id:D8}.img" 이름을 재귀 탐색한다.
+	// AvatarCanvasManager.FindNodeByGearID와 동일한 탐색 방식.
+	private static Wz_Node? FindGearNode(Wz_Node? characterRoot, int id)
+	{
+		if (characterRoot == null)
+			return null;
+
+		string imgName = id.ToString("D8") + ".img";
+
+		foreach (var node1 in characterRoot.Nodes)
+		{
+			if (node1.Text.Contains("_Canvas"))
+				continue;
+
+			if (node1.Text == imgName)
+				return node1;
+
+			foreach (var node2 in node1.Nodes)
+			{
+				if (node2.Text == imgName)
+					return node2;
+			}
+		}
+
+		return null;
 	}
 
 	// ── wz_free ─────────────────────────────────────────────────────────────
