@@ -404,7 +404,21 @@ public static unsafe class WzExports
 			canvas.ActionName = actionName;
 			canvas.EmotionName = emotionName;
 
-			Bone bone = canvas.CreateFrame(frameIndex, emotionFrameIndex, 0, null);
+			// effectFrames — 무기/케이프/반지 등 일부 아이템은 자체 이미지 말고도
+			// "Effect/ItemEff.img/{ID}/effect"에 별도로 붙는 부가 이펙트(예: 무기
+			// 발광 효과)를 갖고 있다(AvatarPart.cs:92, LoadInfo 시 자동으로 EffectNode에
+			// 채워짐). CreateFrame이 이 레이어를 실제로 그리려면 effectFrames가
+			// null이 아니라 "각 레이어에서 몇 번째 프레임을 쓸지" 배열이어야 하는데
+			// (AvatarCanvas.cs:1060 — null이면 이 블록 전체를 건너뛰어 모든 아이템
+			// 이펙트가 무조건 빠짐), 지금까지 null을 넘겨서 이펙트가 있는 아이템도
+			// 항상 이펙트 없이 렌더링되고 있었다. 모든 레이어에 0번 프레임을
+			// 요청해두면(LayerSlotLength = 29(Parts) + 4(체어/이펙트 2단 레이어)),
+			// 실제로 이펙트 데이터가 없는 파츠는 GetEffectFrame/LinkEffectParts가
+			// null을 그대로 반환해 안전하게 스킵되고(AvatarCanvas.cs:895-898,
+			// 2039), 이펙트가 있는 파츠만 첫 프레임이 자동으로 덧그려진다 — 프레임
+			// 애니메이션 재생은 이번 범위 밖이라 항상 0번 고정.
+			int[] effectFrames = new int[AvatarCanvas.LayerSlotLength];
+			Bone bone = canvas.CreateFrame(frameIndex, emotionFrameIndex, 0, effectFrames);
 			if (bone == null)
 				return IntPtr.Zero;
 
