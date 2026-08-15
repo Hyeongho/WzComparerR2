@@ -339,13 +339,16 @@ public static unsafe class WzExports
 							// (skin % 2000) + 2000 같은 공식 없이 바로 경로를 재구성할 수 있다.
 					case 1: // Head — 마찬가지로 저장된 값 자체가 "Character\{id:D8}.img"의 그 8자리다.
 					{
-						Wz_Node? node = root.FindNodeByPath($@"Character\{id:D8}.img");
+						// extractImage: true 필수 — false(기본값)면 .img 경계에서
+						// Wz_Image.TryExtract()가 호출되지 않아 내부 트리(map/z/액션
+						// 프레임 등)가 하나도 안 채워진 빈 노드가 반환된다.
+						Wz_Node? node = root.FindNodeByPath($@"Character\{id:D8}.img", true);
 						if (node != null) canvas.AddPart(node);
 						break;
 					}
 					case 2: // Face
 					{
-						Wz_Node? node = root.FindNodeByPath($@"Character\Face\{id:D8}.img");
+						Wz_Node? node = root.FindNodeByPath($@"Character\Face\{id:D8}.img", true);
 						if (node != null)
 						{
 							canvas.AddPart(node);
@@ -355,7 +358,7 @@ public static unsafe class WzExports
 					}
 					case 3: // Hair
 					{
-						Wz_Node? node = root.FindNodeByPath($@"Character\Hair\{id:D8}.img");
+						Wz_Node? node = root.FindNodeByPath($@"Character\Hair\{id:D8}.img", true);
 						if (node != null) canvas.AddPart(node);
 						break;
 					}
@@ -425,6 +428,11 @@ public static unsafe class WzExports
 	// Character.wz 하위(카테고리 폴더 한 단계 + 그 안쪽 한 단계, _Canvas 폴더는
 	// 건너뜀)에서 "{id:D8}.img" 이름을 재귀 탐색한다.
 	// AvatarCanvasManager.FindNodeByGearID와 동일한 탐색 방식.
+	//
+	// 이름만 매칭하고 끝내면 안 된다 — 여기서 순회하는 node1.Nodes는 아직
+	// 한 번도 열리지 않은 .img 노드들이라 내부 트리가 비어있다(FindNodeByPath의
+	// extractImage=true와 동일하게, 매칭된 .img는 직접 TryExtract()를 호출해서
+	// 실제 내용을 채워야 AvatarCanvas.AddPart가 map/z/아이콘 데이터를 찾을 수 있다).
 	private static Wz_Node? FindGearNode(Wz_Node? characterRoot, int id)
 	{
 		if (characterRoot == null)
@@ -438,16 +446,26 @@ public static unsafe class WzExports
 				continue;
 
 			if (node1.Text == imgName)
-				return node1;
+				return ExtractImgNode(node1);
 
 			foreach (var node2 in node1.Nodes)
 			{
 				if (node2.Text == imgName)
-					return node2;
+					return ExtractImgNode(node2);
 			}
 		}
 
 		return null;
+	}
+
+	// Wz_Node.FindNodeByPath(path, extractImage: true) 내부 구현과 동일한 패턴 —
+	// 매칭된 .img 노드를 TryExtract()로 직접 열어서 실제 내용이 채워진 노드를 반환한다.
+	private static Wz_Node ExtractImgNode(Wz_Node node)
+	{
+		var img = node.GetValue<Wz_Image>();
+		if (img != null && img.TryExtract())
+			return img.Node;
+		return node;
 	}
 
 	// ── wz_free ─────────────────────────────────────────────────────────────
