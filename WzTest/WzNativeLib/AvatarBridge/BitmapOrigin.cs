@@ -1,14 +1,14 @@
 // BitmapOrigin.cs — WzComparerR2.Common/BitmapOrigin.cs의 로컬 사본.
 //
-// 원본을 그대로 링크하지 않고 사본을 둔 이유: 원본이 쓰는
-// `using WzComparerR2.Common;`이 실제로는 아무 타입도 참조하지 않는데(같은
-// 파일에서 실제로 쓰는 GlobalFindNodeFunction은 bare `WzComparerR2` 네임스페이스라
-// using 없이도 보임), 우리 프로젝트는 WzComparerR2.Common 네임스페이스를 선언하는
-// 다른 파일(GifFrame.cs 등)을 하나도 링크하지 않으므로 그 using 한 줄만으로
-// 네임스페이스를 못 찾는 컴파일 에러가 날 수 있다. 그 한 줄만 뺀 것 외에는
-// 원본과 동일.
+// 원본을 그대로 링크하지 않고 사본을 둔 이유는 원본이 참조하는 몇몇 GUI 전용
+// 확장 기능(예: XNA Texture2D 관련 오버로드가 있는 형제 파일들)까지 통째로
+// 끌려올 위험을 피하려는 것 — 이 파일 자체가 실제로 쓰는 건
+// `node.HandleFullUol(...)`/`node.GetLinkedSourceNode(...)` 확장 메서드
+// (WzComparerR2.Common.Wz_NodeExtension2에 정의, 우리가 이것도 개별
+// 링크했음)뿐이라 `using WzComparerR2.Common;`은 그대로 필요하다.
 using System.Drawing;
 using WzComparerR2.WzLib;
+using WzComparerR2.Common;
 
 namespace WzComparerR2
 {

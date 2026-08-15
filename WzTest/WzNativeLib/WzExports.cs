@@ -15,6 +15,7 @@ using System.Drawing;
 using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
 using System.Text;
+using WzComparerR2;
 using WzComparerR2.WzLib;
 using WzComparerR2.AvatarCommon;
 using WzComparerR2.PluginBase;

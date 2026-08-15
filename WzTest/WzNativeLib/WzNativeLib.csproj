@@ -48,6 +48,10 @@
     <Compile Include="../../WzComparerR2/AvatarCommon/Prism.cs" Link="AvatarBridge/Prism.cs" />
     <Compile Include="../../WzComparerR2/AvatarCommon/PrismData.cs" Link="AvatarBridge/PrismData.cs" />
     <Compile Include="../../WzComparerR2/AvatarCommon/PrismDataCollection.cs" Link="AvatarBridge/PrismDataCollection.cs" />
+    <!-- AvatarCanvas.Actions/LoadAction()이 쓰는 "동작 하나"를 나타내는 클래스.
+         이걸 안 링크하면 컴파일러가 같은 이름의 System.Action(델리게이트)으로
+         잘못 해석해서 CS1061/CS1729 에러가 난다. -->
+    <Compile Include="../../WzComparerR2/AvatarCommon/Action.cs" Link="AvatarBridge/Action.cs" />
     <!-- AvatarPart가 내부적으로 쓰는 아이템 ID→종류 분류 (순수 로직, GUI 의존 없음) -->
     <Compile Include="../../WzComparerR2.Common/CharaSim/Gear.cs" Link="AvatarBridge/CharaSim/Gear.cs" />
     <Compile Include="../../WzComparerR2.Common/CharaSim/GearType.cs" Link="AvatarBridge/CharaSim/GearType.cs" />
@@ -76,6 +80,10 @@
     <Compile Include="../../WzComparerR2.Common/CharaSim/Skill.cs" Link="AvatarBridge/CharaSim/Skill.cs" />
     <!-- BitmapOrigin.CreateFromNode가 델리게이트 파라미터로 쓰는 타입 (델리게이트 선언 하나뿐) -->
     <Compile Include="../../WzComparerR2.Common/GlobalFindNodeFunction.cs" Link="AvatarBridge/GlobalFindNodeFunction.cs" />
+    <!-- 우리가 복사한 BitmapOrigin.cs가 쓰는 node.HandleFullUol/GetLinkedSourceNode
+         확장 메서드 (원본 BitmapOrigin.cs도 같은 걸 씀). 확장 메서드 2개뿐인
+         순수 로직 파일. -->
+    <Compile Include="../../WzComparerR2.Common/Wz_NodeExtension2.cs" Link="AvatarBridge/Wz_NodeExtension2.cs" />
   </ItemGroup>
 
 </Project>
