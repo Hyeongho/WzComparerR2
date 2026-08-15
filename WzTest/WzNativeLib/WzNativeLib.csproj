@@ -44,6 +44,10 @@
     <Compile Include="../../WzComparerR2/AvatarCommon/AvatarPart.cs" Link="AvatarBridge/AvatarPart.cs" />
     <Compile Include="../../WzComparerR2/AvatarCommon/AvatarFrameData.cs" Link="AvatarBridge/AvatarFrameData.cs" />
     <Compile Include="../../WzComparerR2/AvatarCommon/ActionFrame.cs" Link="AvatarBridge/ActionFrame.cs" />
+    <Compile Include="../../WzComparerR2/AvatarCommon/ChairPart.cs" Link="AvatarBridge/ChairPart.cs" />
+    <Compile Include="../../WzComparerR2/AvatarCommon/Prism.cs" Link="AvatarBridge/Prism.cs" />
+    <Compile Include="../../WzComparerR2/AvatarCommon/PrismData.cs" Link="AvatarBridge/PrismData.cs" />
+    <Compile Include="../../WzComparerR2/AvatarCommon/PrismDataCollection.cs" Link="AvatarBridge/PrismDataCollection.cs" />
     <!-- AvatarPart가 내부적으로 쓰는 아이템 ID→종류 분류 (순수 로직, GUI 의존 없음) -->
     <Compile Include="../../WzComparerR2.Common/CharaSim/Gear.cs" Link="AvatarBridge/CharaSim/Gear.cs" />
     <Compile Include="../../WzComparerR2.Common/CharaSim/GearType.cs" Link="AvatarBridge/CharaSim/GearType.cs" />
