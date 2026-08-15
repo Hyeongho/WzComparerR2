@@ -260,12 +260,17 @@ public static unsafe class WzExports
 	// ── wz_read_avatar ──────────────────────────────────────────────────────
 	// wzPathUtf8      : WZ 파일 경로 또는 WZ 폴더 경로 (Base.wz 등, wz_read_canvas와
 	//                   동일하게 KMST 병합/레거시 분할 포맷 자동 처리)
-	// loadoutSpecUtf8 : 세미콜론 구분 "슬롯=아이템ID" 목록
-	//                   (예: "body=2000000;face=20000;hair=30000;cap=1002140;coat=1040002")
-	//                   지원 슬롯: body / face / hair / 그 외(cap, coat, longcoat,
-	//                   pants, shoes, glove, weapon, cape, earrings,
-	//                   faceAccessory, eyeAccessory 등 — Character.wz 하위를
-	//                   재귀 탐색해서 찾음). 장착 안 한 슬롯은 그냥 생략.
+	// loadoutSpecUtf8 : 콤마 구분 29칸 위치 기반 아이템 ID 목록 — WzComparerR2
+	//                   GUI(AvatarForm.GetAllPartsTag())가 만드는 "아바타 코드"와
+	//                   동일한 포맷이라 그대로 재사용한다. AvatarCanvas.Parts[]
+	//                   인덱스 순서 그대로:
+	//                   0=Body,1=Head,2=Face,3=Hair,4=Cap,5=Coat,6=Longcoat,
+	//                   7=Pants,8=Shoes,9=Glove,10=SubWeapon,11=Cape,12=Weapon,
+	//                   13=Earrings,14=FaceAccessory,15=EyeAccessory,16=Taming,
+	//                   17=Saddle,18=Chair,19=Effect,20=Pendant,21=Belt,
+	//                   22=ShoulderPad,23=Pocket,24=Emblem,25=Ring1,26=Ring2,
+	//                   27=Ring3,28=Ring4. 장착 안 한 슬롯은 빈 칸으로 둔다
+	//                   (예: "2015,12015,53003,65007,,,1054087,,1073816,,,,1703431,,,,,,,,,,,,,,,,").
 	// actionNameUtf8/frameIndex        : 몸 액션 이름("stand1" 등)과 프레임 번호
 	// emotionNameUtf8/emotionFrameIndex: 표정 이름("default" 등)과 프레임 번호
 	// outWidth/outHeight     : 합성된 이미지 크기 (실패 시 0)
@@ -321,31 +326,23 @@ public static unsafe class WzExports
 
 			Wz_Node? characterRoot = root.FindNodeByPath("Character");
 
-			foreach (string entry in loadoutSpec.Split(';', StringSplitOptions.RemoveEmptyEntries))
+			string[] slots = loadoutSpec.Split(',');
+			for (int i = 0; i < slots.Length; i++)
 			{
-				int eq = entry.IndexOf('=');
-				if (eq < 0)
+				if (!int.TryParse(slots[i].Trim(), out int id))
 					continue;
 
-				string slot = entry.Substring(0, eq).Trim();
-				if (!int.TryParse(entry.Substring(eq + 1).Trim(), out int id))
-					continue;
-
-				switch (slot)
+				switch (i)
 				{
-					case "body":
+					case 0: // Body — Parts[0]의 ID는 "Character\{id:D8}.img" 파일명에서 그대로 파싱된 값이라
+							// (skin % 2000) + 2000 같은 공식 없이 바로 경로를 재구성할 수 있다.
+					case 1: // Head — 마찬가지로 저장된 값 자체가 "Character\{id:D8}.img"의 그 8자리다.
 					{
-						// AvatarCanvasManager.AddBodyFromSkin과 동일한 공식.
-						int skinID = (id % 2000) + 2000;
-						Wz_Node? bodyNode = root.FindNodeByPath($@"Character\0000{skinID:D4}.img")
-							?? root.FindNodeByPath(@"Character\00002000.img");
-						Wz_Node? headNode = root.FindNodeByPath($@"Character\0001{skinID:D4}.img")
-							?? root.FindNodeByPath(@"Character\00012000.img");
-						if (bodyNode != null) canvas.AddPart(bodyNode);
-						if (headNode != null) canvas.AddPart(headNode);
+						Wz_Node? node = root.FindNodeByPath($@"Character\{id:D8}.img");
+						if (node != null) canvas.AddPart(node);
 						break;
 					}
-					case "face":
+					case 2: // Face
 					{
 						Wz_Node? node = root.FindNodeByPath($@"Character\Face\{id:D8}.img");
 						if (node != null)
@@ -355,7 +352,7 @@ public static unsafe class WzExports
 						}
 						break;
 					}
-					case "hair":
+					case 3: // Hair
 					{
 						Wz_Node? node = root.FindNodeByPath($@"Character\Hair\{id:D8}.img");
 						if (node != null) canvas.AddPart(node);
@@ -363,12 +360,13 @@ public static unsafe class WzExports
 					}
 					default:
 					{
-						// 나머지 장비 슬롯(cap/coat/longcoat/pants/shoes/glove/weapon/
-						// cape/earrings/faceAccessory/eyeAccessory 등) — 슬롯 이름 자체는
-						// AvatarCanvas.AddPart 내부의 Gear.GetGearType()이 아이템 ID로
-						// 알아서 판별하므로, 우리는 Character.wz 하위에서 {id:D8}.img만
-						// 찾아주면 된다(AvatarCanvasManager.FindNodeByGearID와 동일한 방식,
-						// _Canvas 폴더는 건너뜀).
+						// 나머지 장비 슬롯(Cap~Ring4, 인덱스 4~28) — 정확한 하위 폴더명을
+						// 전부 확신할 수 없어서(예: SubWeapon/Earrings/FaceAccessory가
+						// 실제 WZ 폴더명과 정확히 일치하는지 미검증), 기존처럼
+						// Character.wz 하위를 재귀 탐색해서 {id:D8}.img를 찾는다
+						// (AvatarCanvasManager.FindNodeByGearID와 동일한 방식, _Canvas
+						// 폴더는 건너뜀) — 어느 슬롯인지는 AvatarCanvas.AddPart 내부의
+						// Gear.GetGearType()이 아이템 ID로 알아서 판별한다.
 						Wz_Node? gearNode = FindGearNode(characterRoot, id);
 						if (gearNode != null) canvas.AddPart(gearNode);
 						break;
