@@ -19,6 +19,7 @@ using WzComparerR2;
 using WzComparerR2.WzLib;
 using WzComparerR2.AvatarCommon;
 using WzComparerR2.PluginBase;
+using WzComparerR2.CharaSim;
 
 namespace WzNativeLib;
 
@@ -372,7 +373,29 @@ public static unsafe class WzExports
 						// 폴더는 건너뜀) — 어느 슬롯인지는 AvatarCanvas.AddPart 내부의
 						// Gear.GetGearType()이 아이템 ID로 알아서 판별한다.
 						Wz_Node? gearNode = FindGearNode(characterRoot, id);
-						if (gearNode != null) canvas.AddPart(gearNode);
+						if (gearNode != null)
+						{
+							canvas.AddPart(gearNode);
+
+							// 무기(인덱스 12)가 캐시(젤) 무기(GearType.cashWeapon,
+							// ID/10000==170)면 일반 장비와 다른 렌더링 경로를 탄다 —
+							// AvatarCanvas.CreateFrame이 canvas.WeaponType 값으로
+							// 무기 .img 안의 실제 무기 타입 서브폴더("130","137" 등)를
+							// 골라서 그리는데, 기본값(0)인 채로 두면 그 서브폴더가
+							// 없어서 빈 프레임이 만들어지고 조용히 버려진다(예외/로그
+							// 없음) — 무기가 "찾기는 했는데 안 그려지는" 지금 증상의
+							// 원인. 실제 착용 무기의 원래 타입 정보가 없으므로, GUI
+							// 앱의 기본 선택 로직과 동일하게 이 무기가 가진 유효한
+							// 타입 목록 중 첫 번째를 그대로 쓴다 — 총(WeaponMotionType
+							// ==3) 전용 특수 케이스는 원본 모션 타입 정보가 없어 범위
+							// 밖으로 둔다.
+							if (i == 12 && Gear.GetGearType(id) == GearType.cashWeapon)
+							{
+								var weaponTypes = canvas.GetCashWeaponTypes();
+								if (weaponTypes.Count > 0)
+									canvas.WeaponType = weaponTypes[0];
+							}
+						}
 						break;
 					}
 				}
