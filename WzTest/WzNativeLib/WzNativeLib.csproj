@@ -59,6 +59,21 @@
     <Compile Include="../../WzComparerR2.Common/CharaSim/GearState.cs" Link="AvatarBridge/CharaSim/GearState.cs" />
     <Compile Include="../../WzComparerR2.Common/CharaSim/ItemBase.cs" Link="AvatarBridge/CharaSim/ItemBase.cs" />
     <Compile Include="../../WzComparerR2.Common/CharaSim/ItemBaseType.cs" Link="AvatarBridge/CharaSim/ItemBaseType.cs" />
+    <!-- Gear.cs가 각종 장비 속성/제작 정보 판별에 쓰는 나머지 CharaSim 타입들
+         (자동 의존성 폐포 계산으로 확인 — 전부 System.*/WzLib만 쓰는 순수 로직). -->
+    <Compile Include="../../WzComparerR2.Common/CharaSim/Addition.cs" Link="AvatarBridge/CharaSim/Addition.cs" />
+    <Compile Include="../../WzComparerR2.Common/CharaSim/AdditionType.cs" Link="AvatarBridge/CharaSim/AdditionType.cs" />
+    <Compile Include="../../WzComparerR2.Common/CharaSim/AlienStone.cs" Link="AvatarBridge/CharaSim/AlienStone.cs" />
+    <Compile Include="../../WzComparerR2.Common/CharaSim/AlienStoneGrade.cs" Link="AvatarBridge/CharaSim/AlienStoneGrade.cs" />
+    <Compile Include="../../WzComparerR2.Common/CharaSim/AstraSubWeaponInfo.cs" Link="AvatarBridge/CharaSim/AstraSubWeaponInfo.cs" />
+    <Compile Include="../../WzComparerR2.Common/CharaSim/HyperSkillType.cs" Link="AvatarBridge/CharaSim/HyperSkillType.cs" />
+    <Compile Include="../../WzComparerR2.Common/CharaSim/Item.cs" Link="AvatarBridge/CharaSim/Item.cs" />
+    <Compile Include="../../WzComparerR2.Common/CharaSim/ItemCoreSpecType.cs" Link="AvatarBridge/CharaSim/ItemCoreSpecType.cs" />
+    <Compile Include="../../WzComparerR2.Common/CharaSim/ItemPropType.cs" Link="AvatarBridge/CharaSim/ItemPropType.cs" />
+    <Compile Include="../../WzComparerR2.Common/CharaSim/ItemSpecType.cs" Link="AvatarBridge/CharaSim/ItemSpecType.cs" />
+    <Compile Include="../../WzComparerR2.Common/CharaSim/ItemStringHelper.cs" Link="AvatarBridge/CharaSim/ItemStringHelper.cs" />
+    <Compile Include="../../WzComparerR2.Common/CharaSim/Potential.cs" Link="AvatarBridge/CharaSim/Potential.cs" />
+    <Compile Include="../../WzComparerR2.Common/CharaSim/Skill.cs" Link="AvatarBridge/CharaSim/Skill.cs" />
     <!-- BitmapOrigin.CreateFromNode가 델리게이트 파라미터로 쓰는 타입 (델리게이트 선언 하나뿐) -->
     <Compile Include="../../WzComparerR2.Common/GlobalFindNodeFunction.cs" Link="AvatarBridge/GlobalFindNodeFunction.cs" />
   </ItemGroup>
