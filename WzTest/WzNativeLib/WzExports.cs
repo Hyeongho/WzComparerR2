@@ -404,6 +404,17 @@ public static unsafe class WzExports
 			canvas.ActionName = actionName;
 			canvas.EmotionName = emotionName;
 
+			// 무기 자체에 내장된 기본 이펙트(총구 화염, 찌르기 잔상 등 — 무기 타입
+			// 서브폴더 안 액션/프레임 폴더에서 "weapon" png와 나란히 있는 "effect"
+			// png, AvatarCanvas.cs:1417)는 ShowWeaponEffect/ShowWeaponJumpEffect가
+			// 켜져 있어야 CreateBone이 실제로 그린다(꺼져 있으면 continue로 건너뜀).
+			// 라이브러리 기본값이 이미 true(AvatarCanvas.cs:35-36)이긴 하지만, 항상
+			// 켜져 있음을 코드로 보장하기 위해 명시적으로 설정한다. (해당 액션에
+			// 실제 effect 데이터가 없으면 — 예: stand1 — 여전히 아무것도 안
+			// 그려지는 게 정상이다, 이건 게이트가 아니라 데이터 유무 문제.)
+			canvas.ShowWeaponEffect = true;
+			canvas.ShowWeaponJumpEffect = true;
+
 			// effectFrames — 무기/케이프/반지 등 일부 아이템은 자체 이미지 말고도
 			// "Effect/ItemEff.img/{ID}/effect"에 별도로 붙는 부가 이펙트(예: 무기
 			// 발광 효과)를 갖고 있다(AvatarPart.cs:92, LoadInfo 시 자동으로 EffectNode에
