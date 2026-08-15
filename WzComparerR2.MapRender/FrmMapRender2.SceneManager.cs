@@ -153,7 +153,7 @@ namespace WzComparerR2.MapRender
             var mapData = new MapData(this.Services.GetService<IRandom>());
             mapData.Load(this.mapImgLoading.Node, resLoader);
             mapData.SoundEffPlayer = PlaySoundEff;
-            mapData.LoadMobResource = LoadMobResource;
+            mapData.LoadSceneItemResource = LoadSceneItemResource;
 
             //处理bgm
             Music newBgm = LoadBgm(mapData);
@@ -299,6 +299,7 @@ namespace WzComparerR2.MapRender
             //同步UI
             this.renderEnv.Camera.WorldRect = mapData.VRect;
             ResetCaptureRect();
+            if (UIOptionsInstance != null) LoadCaptureRectOptionData(UIOptionsInstance.DataContext as UIOptionsDataModel);
 
             this.ui.MirrorFrame.Visibility = mapData.ID / 10000000 == 32 ? EmptyKeys.UserInterface.Visibility.Visible : EmptyKeys.UserInterface.Visibility.Collapsed;
 

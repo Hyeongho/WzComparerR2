@@ -24,6 +24,7 @@ using ModifierKeys = EmptyKeys.UserInterface.Input.ModifierKeys;
 using ServiceManager = EmptyKeys.UserInterface.Mvvm.ServiceManager;
 using WzComparerR2.MapRender.Effects;
 using WzComparerR2.Animation;
+using WzComparerR2.PluginBase;
 #endregion
 
 namespace WzComparerR2.MapRender
@@ -140,11 +141,13 @@ namespace WzComparerR2.MapRender
         bool ForceCaptureWithResolution;
         bool showFootholdBoundary;
         bool enableMobMovement;
+        bool removeSkill;
         Task captureTask;
         Resolution resolution;
         float opacity;
 
         List<ItemRect> allItems = new List<ItemRect>();
+        List<ItemRect> allDraggableItems = new List<ItemRect>();
         List<KeyValuePair<SceneItem, MeshItem>> drawableItemsCache = new List<KeyValuePair<SceneItem, MeshItem>>();
         MapRenderUIRoot ui;
         Tooltip2 tooltip;
@@ -160,7 +163,25 @@ namespace WzComparerR2.MapRender
         bool isExiting;
 
         bool CamaraChangedEffState = true;
-        Rectangle CaptureRect = new Rectangle();
+        CaptureRectItem CaptureRectItem = new CaptureRectItem();
+        Rectangle CaptureRect
+        {
+            get { return this.CaptureRectItem?.Rect ?? Rectangle.Empty; }
+            set { this.CaptureRectItem.Rect = value; }
+        }
+
+        UIOptions _uiOptionsInstance;
+        UIOptions UIOptionsInstance
+        {
+            get
+            {
+                if (_uiOptionsInstance == null)
+                {
+                    _uiOptionsInstance = CreateUIOptions();
+                }
+                return _uiOptionsInstance;
+            }
+        }
 
         protected override void Initialize()
         {
@@ -206,6 +227,26 @@ namespace WzComparerR2.MapRender
             base.OnDeactivated(sender, args);
         }
 
+        private UIOptions CreateUIOptions()
+        {
+            var uiWnd = new UIOptions
+            {
+                DataContext = new UIOptionsDataModel(),
+                Visibility = EmptyKeys.UserInterface.Visibility.Hidden,
+                Parent = this.ui
+            };
+
+            uiWnd.OK += UIOption_OK;
+            uiWnd.Cancel += UIOption_Cancel;
+            uiWnd.ResetSCRect += UIOption_ResetSCRect;
+            uiWnd.ChkForceClickEvent += UIOption_ChkForceClickEvent;
+            uiWnd.Visible += UiWnd_Visible;
+
+            this.ui.Windows.Add(uiWnd);
+
+            return uiWnd;
+        }
+
         private void BindingUIInput()
         {
             //键盘事件
@@ -219,24 +260,7 @@ namespace WzComparerR2.MapRender
             //选项界面
             this.ui.InputBindings.Add(new KeyBinding(new RelayCommand(_ =>
             {
-                var uiWnd = this.ui.Windows.OfType<UIOptions>().FirstOrDefault();
-                if (uiWnd == null)
-                {
-                    uiWnd = new UIOptions();
-                    uiWnd.DataContext = new UIOptionsDataModel();
-                    uiWnd.OK += UIOption_OK;
-                    uiWnd.Cancel += UIOption_Cancel;
-                    uiWnd.ResetSCRect += UIOption_ResetSCRect;
-                    uiWnd.ChkForceClickEvent += UIOption_ChkForceClickEvent;
-                    uiWnd.Visible += UiWnd_Visible;
-                    uiWnd.Visibility = EmptyKeys.UserInterface.Visibility.Visible;
-                    this.ui.Windows.Add(uiWnd);
-                    uiWnd.Parent = this.ui;
-                }
-                else
-                {
-                    uiWnd.Toggle();
-                }
+                UIOptionsInstance.Toggle();
             }), KeyCode.Escape, ModifierKeys.None));
 
             //截图
@@ -248,6 +272,9 @@ namespace WzComparerR2.MapRender
 
             //몬스터 제어
             this.ui.InputBindings.Add(new KeyBinding(new RelayCommand(_ => this.mapData?.ResetAllMobs()), KeyCode.R, ModifierKeys.None));
+
+            //소환된 스킬 제거 모드
+            this.ui.InputBindings.Add(new KeyBinding(new RelayCommand(_ => SetRemoveSkillState()), KeyCode.Delete, ModifierKeys.None));
 
             //层隐藏
             this.ui.InputBindings.Add(new KeyBinding(new RelayCommand(_ => this.patchVisibility.BackVisible = !this.patchVisibility.BackVisible), KeyCode.D1, ModifierKeys.Control));
@@ -433,8 +460,6 @@ namespace WzComparerR2.MapRender
                 //鼠标移动
                 bool isMouseDown = false;
                 var direction2 = Vector2.Zero;
-                int captureRectClickedPos = -1;
-                Point prevMousePos = Point.Zero;
 
                 Action<EmptyKeys.UserInterface.Input.MouseEventArgs> calcMouseMoveDir = e =>
                 {
@@ -462,67 +487,6 @@ namespace WzComparerR2.MapRender
                         isMouseDown = true;
                         calcMouseMoveDir(e);
                     }
-                    else if (e.ChangedButton == EmptyKeys.UserInterface.Input.MouseButton.Left)
-                    {
-                        if (this.patchVisibility.CaptureRectVisible)
-                        {
-                            Rectangle rect = this.renderEnv.Camera.WorldRect;
-                            if (!this.CaptureRect.IsEmpty)
-                            {
-                                rect = this.CaptureRect;
-                            }
-
-                            //  1 | 5 | 2
-                            //  8 | 0 | 6
-                            //  4 | 7 | 3
-                            var mouse = this.renderEnv.Input.MousePosition;
-                            var mousePos = this.renderEnv.Camera.CameraToWorld(mouse);
-                            int x = mousePos.X;
-                            int y = mousePos.Y;
-                            int inner = 15;
-                            int outer = 10;
-                            int pos = -1;
-                            if (rect.Left - outer <= x && x < rect.Left + inner && rect.Top - outer <= y && y < rect.Top + inner)
-                            {
-                                pos = 1;
-                            }
-                            else if (rect.Right - inner <= x && x < rect.Right + outer && rect.Top - outer <= y && y < rect.Top + inner)
-                            {
-                                pos = 2;
-                            }
-                            else if (rect.Right - inner <= x && x < rect.Right + outer && rect.Bottom - inner <= y && y < rect.Bottom + outer)
-                            {
-                                pos = 3;
-                            }
-                            else if (rect.Left - outer <= x && x < rect.Left + inner && rect.Bottom - inner <= y && y < rect.Bottom + outer)
-                            {
-                                pos = 4;
-                            }
-                            else if (rect.Left - outer <= x && x < rect.Right + outer && rect.Top - outer <= y && y < rect.Top + inner)
-                            {
-                                pos = 5;
-                            }
-                            else if (rect.Right - inner <= x && x < rect.Right + outer && rect.Top - outer <= y && y < rect.Bottom + outer)
-                            {
-                                pos = 6;
-                            }
-                            else if (rect.Left - outer <= x && x < rect.Right + outer && rect.Bottom - inner <= y && y < rect.Bottom + outer)
-                            {
-                                pos = 7;
-                            }
-                            else if (rect.Left - outer <= x && x < rect.Left + inner && rect.Top - outer <= y && y < rect.Bottom + outer)
-                            {
-                                pos = 8;
-                            }
-                            else if (rect.Contains(x, y))
-                            {
-                                pos = 0;
-                            }
-
-                            captureRectClickedPos = pos;
-                            prevMousePos = mousePos;
-                        }
-                    }
                 };
                 this.ui.MouseDown += mouseBtnEv;
                 this.attachedEvent.Add(EventDisposable(mouseBtnEv, _ev => this.ui.MouseDown -= _ev));
@@ -532,63 +496,6 @@ namespace WzComparerR2.MapRender
                     if (isMouseDown)
                     {
                         calcMouseMoveDir(e);
-                    }
-                    if (captureRectClickedPos >= 0)
-                    {
-                        var mouse = this.renderEnv.Input.MousePosition;
-                        var mousePos = this.renderEnv.Camera.CameraToWorld(mouse);
-                        var dx = mousePos.X - prevMousePos.X;
-                        var dy = mousePos.Y - prevMousePos.Y;
-                        var minX = 25;
-                        var minY = 25;
-                        Rectangle rect = this.renderEnv.Camera.WorldRect;
-                        if (!this.CaptureRect.IsEmpty)
-                        {
-                            rect = this.CaptureRect;
-                        }
-
-                        if (captureRectClickedPos == 0)
-                        {
-                            rect.X += dx;
-                            rect.Y += dy;
-                        }
-                        if (captureRectClickedPos == 1 || captureRectClickedPos == 4 || captureRectClickedPos == 8) // L
-                        {
-                            var pdx = dx;
-                            rect.Width -= dx;
-                            if (rect.Width < minX)
-                            {
-                                pdx -= Math.Max(0, minX - rect.Width);
-                                rect.Width = minX;
-                            }
-                            rect.X += pdx;
-                        }
-                        if (captureRectClickedPos == 1 || captureRectClickedPos == 2 || captureRectClickedPos == 5) // T
-                        {
-                            var pdy = dy;
-                            rect.Height -= dy;
-                            if (rect.Height < minY)
-                            {
-                                pdy -= Math.Max(0, minY - rect.Height);
-                                rect.Height = minY;
-                            }
-                            rect.Y += pdy;
-                        }
-                        if (captureRectClickedPos == 2 || captureRectClickedPos == 3 || captureRectClickedPos == 6) // R
-                        {
-                            rect.Width += dx;
-                        }
-                        if (captureRectClickedPos == 3 || captureRectClickedPos == 4 || captureRectClickedPos == 7) // B
-                        {
-                            rect.Height += dy;
-                        }
-
-                        rect.Width = Math.Max(minX, rect.Width);
-                        rect.Height = Math.Max(minY, rect.Height);
-                        this.CaptureRect = rect;
-                        var uiWnd = this.ui.Windows.OfType<UIOptions>().FirstOrDefault();
-                        if (uiWnd != null) LoadCaptureRectOptionData(uiWnd.DataContext as UIOptionsDataModel);
-                        prevMousePos = mousePos;
                     }
                 };
                 this.ui.MouseMove += mouseEv;
@@ -600,11 +507,6 @@ namespace WzComparerR2.MapRender
                     {
                         isMouseDown = false;
                         direction2 = Vector2.Zero;
-                    }
-                    else if (e.ChangedButton == EmptyKeys.UserInterface.Input.MouseButton.Left)
-                    {
-                        captureRectClickedPos = -1;
-                        prevMousePos = Point.Zero;
                     }
                 };
                 this.ui.MouseUp += mouseBtnEv;
@@ -653,12 +555,32 @@ namespace WzComparerR2.MapRender
                     int y = (int)(point.Y / cameraScale);
                     var mouseTarget = this.allItems.Reverse<ItemRect>().FirstOrDefault(item =>
                     {
-                        return item.rect.Contains(x, y) && (item.item is PortalItem || item.item is IlluminantClusterItem || item.item is ReactorItem || item.item is LifeItem);
+                        return item.rect.Contains(x, y) && (item.item is PortalItem || item.item is IlluminantClusterItem || item.item is ReactorItem || item.item is LifeItem || item.item is DraggableItem);
                     });
+                    if (mouseTarget.item is DraggableItem) return null;
                     return mouseTarget.item;
                 },
-                this.OnSceneItemClick);
+                onClick: this.OnSceneItemClick);
             this.attachedEvent.Add(disposable);
+
+            var disposable_draggableItemEvent = UIHelper.RegisterClickEvent<DraggableItem>(this.ui, this.ui.ContentControl,
+                (sender, point) =>
+                {
+                    var cameraScale = this.renderEnv.Camera.Scale;
+                    int x = (int)(point.X / cameraScale);
+                    int y = (int)(point.Y / cameraScale);
+                    var mouseTarget = this.allDraggableItems.Reverse<ItemRect>().FirstOrDefault(item =>
+                    {
+                        return item.rect.Contains(x, y) && (item.item is DraggableItem);
+                    });
+                    return mouseTarget.item as DraggableItem;
+                },
+                onMouseDown: this.OnDraggableItemMouseDown,
+                onMouseMove: this.OnDraggableItemMouseMove,
+                onMouseEnter: this.OnDraggableItemMouseEnter,
+                onMouseLeave: this.OnDraggableItemMouseLeave,
+                onClick: this.OnDraggableItemClick);
+            this.attachedEvent.Add(disposable_draggableItemEvent);
 
             this.ui.InputBindings.Add(new KeyBinding(new RelayCommand(_ => {
                 if (this.ui.Visibility == Visibility.Visible)
@@ -777,19 +699,20 @@ namespace WzComparerR2.MapRender
             {
                 case "/help":
                 case "/?":
-                    this.ui.ChatBox.AppendTextHelp(@"/help 도움말 표시");
-                    this.ui.ChatBox.AppendTextHelp(@"/map (mapID) 해당 맵으로 이동");
-                    this.ui.ChatBox.AppendTextHelp(@"/back 이전 맵으로 이동");
-                    this.ui.ChatBox.AppendTextHelp(@"/home 마을로 귀환");
-                    this.ui.ChatBox.AppendTextHelp(@"/history [maxCount] 방문 기록 보기");
-                    this.ui.ChatBox.AppendTextHelp(@"/minimap 미니맵 설정");
-                    this.ui.ChatBox.AppendTextHelp(@"/scene 장면 설정");
-                    this.ui.ChatBox.AppendTextHelp(@"/spine Spine 애니메이션 지정 창 열기");
-                    this.ui.ChatBox.AppendTextHelp(@"/summon 몬스터 소환");
-                    this.ui.ChatBox.AppendTextHelp(@"/quest 퀘스트 설정");
-                    this.ui.ChatBox.AppendTextHelp(@"/questex 퀘스트 키의 값 설정");
-                    this.ui.ChatBox.AppendTextHelp(@"/date 시각 설정");
-                    this.ui.ChatBox.AppendTextHelp(@"/multibgm Multi BGM 설정");
+                    this.ui.ChatBox.AppendTextHelp(@"/help : 도움말 표시");
+                    this.ui.ChatBox.AppendTextHelp(@"/map (mapID) : 해당 맵으로 이동");
+                    this.ui.ChatBox.AppendTextHelp(@"/back : 이전 맵으로 이동");
+                    this.ui.ChatBox.AppendTextHelp(@"/home : 마을로 귀환");
+                    this.ui.ChatBox.AppendTextHelp(@"/history [maxCount] : 방문 기록 보기");
+                    this.ui.ChatBox.AppendTextHelp(@"/minimap : 미니맵 설정");
+                    this.ui.ChatBox.AppendTextHelp(@"/scene : 장면 설정");
+                    this.ui.ChatBox.AppendTextHelp(@"/skill : 스킬 소환");
+                    this.ui.ChatBox.AppendTextHelp(@"/spine : Spine 애니메이션 지정 창 열기");
+                    this.ui.ChatBox.AppendTextHelp(@"/summon : 몬스터 소환");
+                    this.ui.ChatBox.AppendTextHelp(@"/quest : 퀘스트 설정");
+                    this.ui.ChatBox.AppendTextHelp(@"/questex : 퀘스트 키의 값 설정");
+                    this.ui.ChatBox.AppendTextHelp(@"/date : 시각 설정");
+                    this.ui.ChatBox.AppendTextHelp(@"/multibgm : Multi BGM 설정");
                     break;
 
                 case "/map":
@@ -878,8 +801,8 @@ namespace WzComparerR2.MapRender
                             break;
 
                         default:
-                            this.ui.ChatBox.AppendTextHelp(@"/minimap list 미니맵 목록 보기");
-                            this.ui.ChatBox.AppendTextHelp(@"/minimap set (canvasName) 해당 미니맵으로 변경");
+                            this.ui.ChatBox.AppendTextHelp(@"/minimap list : 미니맵 목록 보기");
+                            this.ui.ChatBox.AppendTextHelp(@"/minimap set (canvasName) : 해당 미니맵으로 변경");
                             break;
                     }
                     break;
@@ -970,19 +893,19 @@ namespace WzComparerR2.MapRender
                                     }
                                     break;
                                 default:
-                                    this.ui.ChatBox.AppendTextHelp(@"/scene tag list 태그 목록 보기");
-                                    this.ui.ChatBox.AppendTextHelp(@"/scene tag info 현재 태그 표시 상태 확인");
-                                    this.ui.ChatBox.AppendTextHelp(@"/scene tag show (tagName)... 해당 태그 보이기");
-                                    this.ui.ChatBox.AppendTextHelp(@"/scene tag hide (tagName)... 해당 태그 숨기기");
-                                    this.ui.ChatBox.AppendTextHelp(@"/scene tag reset (tagName)... 해당 태그 표시 상태 재설정");
-                                    this.ui.ChatBox.AppendTextHelp(@"/scene tag reset-all 모든 태그 표시 상태 재설정");
-                                    this.ui.ChatBox.AppendTextHelp(@"/scene tag set-default (true/false) 태그 기본 표시 상태 설정");
+                                    this.ui.ChatBox.AppendTextHelp(@"/scene tag list : 태그 목록 보기");
+                                    this.ui.ChatBox.AppendTextHelp(@"/scene tag info : 현재 태그 표시 상태 확인");
+                                    this.ui.ChatBox.AppendTextHelp(@"/scene tag show (tagName)... : 해당 태그 보이기");
+                                    this.ui.ChatBox.AppendTextHelp(@"/scene tag hide (tagName)... : 해당 태그 숨기기");
+                                    this.ui.ChatBox.AppendTextHelp(@"/scene tag reset (tagName)... : 해당 태그 표시 상태 재설정");
+                                    this.ui.ChatBox.AppendTextHelp(@"/scene tag reset-all : 모든 태그 표시 상태 재설정");
+                                    this.ui.ChatBox.AppendTextHelp(@"/scene tag set-default (true/false) : 태그 기본 표시 상태 설정");
                                     break;
                             }
                             break;
 
                         default:
-                            this.ui.ChatBox.AppendTextHelp(@"/scene tag 태그 표시 상태 설정");
+                            this.ui.ChatBox.AppendTextHelp(@"/scene tag : 태그 표시 상태 설정");
                             break;
                     }
                     break;
@@ -1018,8 +941,8 @@ namespace WzComparerR2.MapRender
                             break;
 
                         default:
-                            this.ui.ChatBox.AppendTextHelp(@"/date list 관련된 시간 목록 보기");
-                            this.ui.ChatBox.AppendTextHelp(@"/date set (yyyyMMddHHmm) 렌더링 기준 시각 설정");
+                            this.ui.ChatBox.AppendTextHelp(@"/date list : 관련된 시간 목록 보기");
+                            this.ui.ChatBox.AppendTextHelp(@"/date set (yyyyMMddHHmm) : 렌더링 기준 시각 설정");
                             break;
                     }
                     break;
@@ -1084,8 +1007,8 @@ namespace WzComparerR2.MapRender
                             break;
 
                         default:
-                            this.ui.ChatBox.AppendTextHelp(@"/multibgm list Multi BGM 목록 보기");
-                            this.ui.ChatBox.AppendTextHelp(@"/multibgm set (multiBgm) 해당 Multi BGM 재생");
+                            this.ui.ChatBox.AppendTextHelp(@"/multibgm list : Multi BGM 목록 보기");
+                            this.ui.ChatBox.AppendTextHelp(@"/multibgm set (multiBgm) : 해당 Multi BGM 재생");
                             break;
                     }
                     break;
@@ -1133,8 +1056,8 @@ namespace WzComparerR2.MapRender
                             break;
 
                         default:
-                            this.ui.ChatBox.AppendTextHelp(@"/quest list 관련된 퀘스트 목록 보기");
-                            this.ui.ChatBox.AppendTextHelp(@"/quest set (questID) (questState) 해당 퀘스트의 상태 설정");
+                            this.ui.ChatBox.AppendTextHelp(@"/quest list : 관련된 퀘스트 목록 보기");
+                            this.ui.ChatBox.AppendTextHelp(@"/quest set (questID) (questState) : 해당 퀘스트의 상태 설정");
                             break;
                     }
                     break;
@@ -1178,8 +1101,8 @@ namespace WzComparerR2.MapRender
                             break;
 
                         default:
-                            this.ui.ChatBox.AppendTextHelp(@"/questex list 관련된 퀘스트 키 목록 보기");
-                            this.ui.ChatBox.AppendTextHelp(@"/questex set (questID) (key) (questState) 해당 퀘스트 키의 값 설정");
+                            this.ui.ChatBox.AppendTextHelp(@"/questex list : 관련된 퀘스트 키 목록 보기");
+                            this.ui.ChatBox.AppendTextHelp(@"/questex set (questID) (key) (questState) : 해당 퀘스트 키의 값 설정");
                             break;
                     }
                     break;
@@ -1218,87 +1141,228 @@ namespace WzComparerR2.MapRender
                         this.ui.ChatBox.AppendTextSystem("맵이 로드되지 않았습니다.");
                         break;
                     }
-
-                    CommandParser cp = new CommandParser(CommandParser.SummonSpecs, arguments);
-                    string si = cp.GetPositional(0);
-                    string sx = cp.GetPositional(1);
-                    string sy = cp.GetPositional(2);
-                    bool flip = cp.HasFlag("Flip");
-                    bool regen = cp.HasFlag("Regen");
-
-                    if (string.Equals(si, "preset", StringComparison.OrdinalIgnoreCase))
                     {
-                        var mapID = this.mapData.ID ?? 0;
-                        IReadOnlyList<string> presets;
-                        if (SummonPreset.MapPresets.TryGetValue(mapID, out presets))
+                        CommandParser cp = new CommandParser(CommandParser.SummonSpecs, arguments);
+                        string si = cp.GetPositional(0);
+                        string sx = cp.GetPositional(1);
+                        string sy = cp.GetPositional(2);
+                        bool flip = cp.HasFlag("Flip");
+                        bool regen = cp.HasFlag("Regen");
+
+                        if (string.Equals(si, "preset", StringComparison.OrdinalIgnoreCase))
                         {
-                            if (string.Equals(sx, "list", StringComparison.OrdinalIgnoreCase))
+                            var mapID = this.mapData.ID ?? 0;
+                            IReadOnlyList<string> presets;
+                            if (SummonPreset.MapPresets.TryGetValue(mapID, out presets))
                             {
-                                int i = 1;
-                                this.ui.ChatBox.AppendTextHelp($"프리셋 개수: ({presets.Count})");
-                                foreach (var preset in presets)
+                                if (string.Equals(sx, "list", StringComparison.OrdinalIgnoreCase))
                                 {
-                                    this.ui.ChatBox.AppendTextHelp($"{i++}: {preset}");
-                                }
-                            }
-                            else if (int.TryParse(sx, out int presetIndex))
-                            {
-                                if (presetIndex >= 1 && presetIndex <= presets.Count && SummonPreset.AllPresets.TryGetValue(presets[presetIndex - 1], out var summons))
-                                {
-                                    foreach (var summon in summons)
+                                    int i = 1;
+                                    this.ui.ChatBox.AppendTextHelp($"프리셋 개수: ({presets.Count})");
+                                    foreach (var preset in presets)
                                     {
-                                        this.mapData.SummonMob(summon.MobID, summon.X, summon.Y, z0: summon.Z0, z1: summon.Z1, fh: summon.Foothold, flip: summon.Flip, playRegenMotion: summon.Regen);
+                                        this.ui.ChatBox.AppendTextHelp($"{i++}: {preset}");
                                     }
-                                    this.ui.ChatBox.AppendTextSystem($@"{presetIndex}번 프리셋이 적용되었습니다.");
+                                }
+                                else if (int.TryParse(sx, out int presetIndex))
+                                {
+                                    if (presetIndex >= 1 && presetIndex <= presets.Count && SummonPreset.AllPresets.TryGetValue(presets[presetIndex - 1], out var summons))
+                                    {
+                                        foreach (var summon in summons)
+                                        {
+                                            this.mapData.SummonMob(summon.MobID, summon.X, summon.Y, z0: summon.Z0, z1: summon.Z1, fh: summon.Foothold, flip: summon.Flip, playRegenMotion: summon.Regen);
+                                        }
+                                        this.ui.ChatBox.AppendTextSystem($@"{presetIndex}번 프리셋이 적용되었습니다.");
+                                    }
+                                    else
+                                    {
+                                        this.ui.ChatBox.AppendTextSystem($@"올바르지 않은 프리셋 번호입니다.");
+                                    }
                                 }
                                 else
                                 {
-                                    this.ui.ChatBox.AppendTextSystem($@"올바르지 않은 프리셋 번호입니다.");
+                                    this.ui.ChatBox.AppendTextHelp(@"/summon preset list : 프리셋 목록 보기");
+                                    this.ui.ChatBox.AppendTextHelp(@"/summon preset (x) : x번 프리셋 실행");
                                 }
                             }
                             else
                             {
-                                this.ui.ChatBox.AppendTextHelp(@"/summon preset list 프리셋 목록 보기");
-                                this.ui.ChatBox.AppendTextHelp(@"/summon preset (x) x번 프리셋 실행");
+                                this.ui.ChatBox.AppendTextSystem($@"현재 맵에 사용 가능한 프리셋이 없습니다.");
+                            }
+                        }
+                        else if (int.TryParse(si, out int mobID))
+                        {
+                            int x, y;
+                            if (!int.TryParse(sx, out x) || !int.TryParse(sy, out y))
+                            {
+                                var p = this.renderEnv.Camera.CameraToWorld(renderEnv.Input.MousePosition);
+                                x = p.X;
+                                y = p.Y;
+                            }
+                            StringResult sr;
+                            string mobName = string.Empty;
+                            if (this.StringLinker != null)
+                            {
+                                this.StringLinker.StringMob.TryGetValue(mobID, out sr);
+                                mobName = sr?.Name ?? "(null)";
+                            }
+                            if (this.mapData.SummonMob(mobID, x, y, z0: 0, z1: 0, fh: -1, flip: flip, playRegenMotion: regen))
+                            {
+                                this.ui.ChatBox.AppendTextSystem($@"몬스터가 소환되었습니다. {mobName}({mobID})");
+                            }
+                            else
+                            {
+                                this.ui.ChatBox.AppendTextSystem($@"몬스터를 찾지 못했습니다. ({mobID})");
                             }
                         }
                         else
                         {
-                            this.ui.ChatBox.AppendTextSystem($@"현재 맵에 사용 가능한 프리셋이 없습니다.");
+                            this.ui.ChatBox.AppendTextHelp(@"/summon (mobID) : 마우스 위치에 mobID 몬스터 소환");
+                            this.ui.ChatBox.AppendTextHelp(@"/summon (mobID) (x) (y) : x, y 위치에 mobID 몬스터 소환");
+                            this.ui.ChatBox.AppendTextHelp(@"/summon preset : 몬스터 소환 프리셋 사용");
+                            this.ui.ChatBox.AppendTextHelp(@"[-f/--flip] : 좌우 반전으로 소환");
+                            this.ui.ChatBox.AppendTextHelp(@"[-r/--regen] : 소환 시 리젠 모션 재생");
                         }
                     }
-                    else if (int.TryParse(si, out int mobID))
+                    break;
+
+                case "/skill":
+                    if (this.mapData == null)
                     {
-                        int x, y;
-                        if (!int.TryParse(sx, out x) || !int.TryParse(sy, out y))
+                        this.ui.ChatBox.AppendTextSystem("맵이 로드되지 않았습니다.");
+                        break;
+                    }
+                    {
+                        CommandParser cp = new CommandParser(CommandParser.SkillSpecs, arguments);
+                        string si = cp.GetPositional(0);
+                        string sp = cp.GetPositional(1);
+                        List<string> pos = cp.GetOption("Pos");
+                        List<string> range = cp.GetOption("Range");
+                        bool flip = cp.HasFlag("Flip");
+                        if (string.Equals(si, "janus", StringComparison.OrdinalIgnoreCase))
                         {
-                            var p = this.renderEnv.Camera.CameraToWorld(renderEnv.Input.MousePosition);
-                            x = p.X;
-                            y = p.Y;
+                            if (!int.TryParse(sp, out int level) || level < 1 || level > 3)
+                            {
+                                level = 1;
+                            }
+                            int janusID = 500001002 + level - 1;
+                            var aniPath = $@"summon/stand";
+
+                            int x, y;
+                            if (pos.Count != 2 || !int.TryParse(pos[0], out x) || !int.TryParse(pos[1], out y))
+                            {
+                                var p = this.renderEnv.Camera.CameraToWorld(renderEnv.Input.MousePosition);
+                                x = p.X;
+                                y = p.Y;
+                            }
+
+                            int[][] ltrb = [[-280, -415, 280, 145], [-255, -390, 255, 120], [-235, -370, 235, 100]];
+                            var rangePath = $@"Skill\50000.img\skill\{janusID:D7}\summon\attack1\info\range";
+                            var rangeNode = PluginManager.FindWz(rangePath);
+                            Wz_Vector lt, rb;
+                            if ((lt = rangeNode?.FindNodeByPath("lt").GetValueEx<Wz_Vector>(null)) != null)
+                            {
+                                ltrb[level - 1][0] = lt.X;
+                                ltrb[level - 1][1] = lt.Y;
+                            }
+                            if ((rb = rangeNode?.FindNodeByPath("rb").GetValueEx<Wz_Vector>(null)) != null)
+                            {
+                                ltrb[level - 1][2] = rb.X;
+                                ltrb[level - 1][3] = rb.Y;
+                            }
+                            int l = ltrb[level - 1][0];
+                            int t = ltrb[level - 1][1];
+                            int r = ltrb[level - 1][2];
+                            int b = ltrb[level - 1][3];
+
+                            StringResult sr;
+                            string skillName = string.Empty;
+                            if (this.StringLinker != null)
+                            {
+                                this.StringLinker.StringSkill.TryGetValue(janusID, out sr);
+                                skillName = sr?.Name ?? "(null)";
+                            }
+                            if (this.mapData.SummonSkill(skillName, janusID, x, y, l, t, r, b, aniPath, flip: flip))
+                            {
+                                this.ui.ChatBox.AppendTextSystem($@"스킬이 추가되었습니다. {skillName}({janusID}), 경로: {aniPath}");
+                                if (l >= r || t >= b)
+                                {
+                                    this.ui.ChatBox.AppendTextWarning($@"스킬 범위를 자동으로 찾을 수 없거나 잘못된 스킬 범위가 입력되어, 이미지 크기를 스킬 범위로 간주합니다.");
+                                }
+                            }
+                            else
+                            {
+                                this.ui.ChatBox.AppendTextSystem($@"스킬을 찾지 못했습니다. ({janusID}), 경로: {aniPath}");
+                            }
                         }
-                        StringResult sr;
-                        string mobName = string.Empty;
-                        if (this.StringLinker != null)
+                        else if (int.TryParse(si, out int skillID))
                         {
-                            this.StringLinker.StringMob.TryGetValue(mobID, out sr);
-                            mobName = sr?.Name ?? "(null)";
-                        }
-                        if (this.mapData.SummonMob(mobID, x, y, z0: 0, z1: 0, fh: -1, flip: flip, playRegenMotion: regen))
-                        {
-                            this.ui.ChatBox.AppendTextSystem($@"몬스터가 소환되었습니다. {mobName}({mobID})");
+                            int x, y;
+                            if (pos.Count != 2 || !int.TryParse(pos[0], out x) || !int.TryParse(pos[1], out y))
+                            {
+                                var p = this.renderEnv.Camera.CameraToWorld(renderEnv.Input.MousePosition);
+                                x = p.X;
+                                y = p.Y;
+                            }
+
+                            int l, t, r, b ;
+                            if (range.Count != 4 ||
+                                !int.TryParse(range[0], out l) || !int.TryParse(range[1], out t) ||
+                                !int.TryParse(range[2], out r) || !int.TryParse(range[3], out b))
+                            {
+                                l = 0; t = 0; r = 0; b = 0;
+                                string img;
+                                if (skillID >= 80000000 && skillID < 90000000)
+                                {
+                                    img = (skillID / 100).ToString();
+                                }
+                                else
+                                {
+                                    img = (skillID / 10000).ToString();
+                                }
+                                var rangePath = $@"Skill\{img}.img\skill\{skillID:D7}\common";
+                                var rangeNode = PluginManager.FindWz(rangePath);
+                                Wz_Vector lt, rb;
+                                if ((lt = rangeNode?.FindNodeByPath("lt").GetValueEx<Wz_Vector>(null)) != null)
+                                {
+                                    l = lt.X;
+                                    t = lt.Y;
+                                }
+                                if ((rb = rangeNode?.FindNodeByPath("rb").GetValueEx<Wz_Vector>(null)) != null)
+                                {
+                                    r = rb.X;
+                                    b = rb.Y;
+                                }
+                            }
+
+                            StringResult sr;
+                            string skillName = string.Empty;
+                            if (this.StringLinker != null)
+                            {
+                                this.StringLinker.StringSkill.TryGetValue(skillID, out sr);
+                                skillName = sr?.Name ?? "(null)";
+                            }
+                            if (this.mapData.SummonSkill(skillName, skillID, x, y, l, t, r, b, sp, flip: flip))
+                            {
+                                this.ui.ChatBox.AppendTextSystem($@"스킬이 추가되었습니다. {skillName}({skillID}), 경로: {sp}");
+                                if (l >= r || t >= b)
+                                {
+                                    this.ui.ChatBox.AppendTextWarning($@"스킬 범위를 자동으로 찾을 수 없거나 잘못된 스킬 범위가 입력되어, 이미지 크기를 스킬 범위로 간주합니다.");
+                                }
+                            }
+                            else
+                            {
+                                this.ui.ChatBox.AppendTextSystem($@"스킬을 찾지 못했습니다. ({skillID}), 경로: {sp}");
+                            }
                         }
                         else
                         {
-                            this.ui.ChatBox.AppendTextSystem($@"몬스터를 찾지 못했습니다. ({mobID})");
+                            this.ui.ChatBox.AppendTextHelp(@"/skill janus (1/2/3) : 마우스 위치에 솔 야누스 새벽 1/2/3단계 소환");
+                            this.ui.ChatBox.AppendTextHelp(@"/skill (skillID) (aniPath) : 마우스 위치에 skillID 스킬 소환, aniPath 애니메이션 경로");
+                            this.ui.ChatBox.AppendTextHelp(@"[-r/--range] (Left) (Top) (Right) (Bottom) : 상하좌우 범위 지정");
+                            this.ui.ChatBox.AppendTextHelp(@"[-p/--pos] (x) (y) : 소환될 x, y 위치 지정");
+                            this.ui.ChatBox.AppendTextHelp(@"[-f/--flip] : 좌우 반전으로 소환");
                         }
-                    }
-                    else
-                    {
-                        this.ui.ChatBox.AppendTextHelp(@"/summon (mobID) 마우스 위치에 mobID 몬스터 소환");
-                        this.ui.ChatBox.AppendTextHelp(@"/summon (mobID) (x) (y) x, y 위치에 mobID 몬스터 소환");
-                        this.ui.ChatBox.AppendTextHelp(@"/summon preset 몬스터 소환 프리셋 사용");
-                        this.ui.ChatBox.AppendTextHelp(@"-f, --flip 좌우 반전으로 소환");
-                        this.ui.ChatBox.AppendTextHelp(@"-r, --regen 소환 시 리젠 모션 재생");
                     }
                     break;
 
@@ -1353,7 +1417,6 @@ namespace WzComparerR2.MapRender
                 {
                     DrawScene(gameTime);
                     DrawTooltipItems(gameTime);
-                    DrawCaptureRect(gameTime);
                 }
                 this.ui.Draw(gameTime.ElapsedGameTime.TotalMilliseconds);
                 this.tooltip.Draw(gameTime, renderEnv);
@@ -1557,6 +1620,21 @@ namespace WzComparerR2.MapRender
             {
             }
         }
+
+        private void SetRemoveSkillState()
+        {
+            if (this.mapData?.Scene?.Fly.Skill.Slots.Count > 0)
+            {
+                this.removeSkill = !this.removeSkill;
+                if (this.removeSkill)
+                {
+                    //this.ui.ChatBox.AppendTextHelp(@"소환된 스킬 클릭 시 삭제할 수 있습니다.");
+                }
+                else
+                {
+                }
+            }
+        }
         #endregion
 
         #region 配置文件相关
@@ -1641,6 +1719,8 @@ namespace WzComparerR2.MapRender
                 model.ScTop = src.Top.ToString();
                 model.ScRight = src.Right.ToString();
                 model.ScBottom = src.Bottom.ToString();
+
+                this.CaptureRect = src;
             }
             else
             {

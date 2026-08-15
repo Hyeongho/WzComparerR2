@@ -65,6 +65,13 @@
             this.labelX6 = new DevComponents.DotNetBar.LabelX();
             this.cmbGroupChair = new DevComponents.DotNetBar.Controls.ComboBoxEx();
             this.btnBodyFloating = new DevComponents.DotNetBar.ButtonX();
+            this.labelXCustomOrigin = new DevComponents.DotNetBar.LabelX();
+            this.labelXCustomOriginX = new DevComponents.DotNetBar.LabelX();
+            this.labelXCustomOriginY = new DevComponents.DotNetBar.LabelX();
+            this.txtCustomOriginX = new DevComponents.Editors.IntegerInput();
+            this.txtCustomOriginY = new DevComponents.Editors.IntegerInput();
+            this.chkCustomOriginObj0 = new DevComponents.DotNetBar.Controls.CheckBoxX();
+            this.chkCustomOriginObj1 = new DevComponents.DotNetBar.Controls.CheckBoxX();
             this.dockContainerItem2 = new DevComponents.DotNetBar.DockContainerItem();
             this.dockSite8 = new DevComponents.DotNetBar.DockSite();
             this.dockSite5 = new DevComponents.DotNetBar.DockSite();
@@ -273,6 +280,13 @@
             this.panelDockContainer2.Controls.Add(this.labelX6);
             this.panelDockContainer2.Controls.Add(this.cmbGroupChair);
             this.panelDockContainer2.Controls.Add(this.btnBodyFloating);
+            this.panelDockContainer2.Controls.Add(this.labelXCustomOrigin);
+            this.panelDockContainer2.Controls.Add(this.labelXCustomOriginX);
+            this.panelDockContainer2.Controls.Add(this.labelXCustomOriginY);
+            this.panelDockContainer2.Controls.Add(this.txtCustomOriginX);
+            this.panelDockContainer2.Controls.Add(this.txtCustomOriginY);
+            this.panelDockContainer2.Controls.Add(this.chkCustomOriginObj0);
+            this.panelDockContainer2.Controls.Add(this.chkCustomOriginObj1);
             this.panelDockContainer2.DisabledBackColor = System.Drawing.Color.Empty;
             this.panelDockContainer2.Location = new System.Drawing.Point(3, 23);
             this.panelDockContainer2.Name = "panelDockContainer2";
@@ -447,7 +461,9 @@
             | System.Windows.Forms.AnchorStyles.Right)));
             this.cmbActionTaming.DisplayMember = "Text";
             this.cmbActionTaming.DrawMode = System.Windows.Forms.DrawMode.OwnerDrawFixed;
-            this.cmbActionTaming.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
+            this.cmbActionTaming.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDown;
+            this.cmbActionTaming.AutoCompleteMode = System.Windows.Forms.AutoCompleteMode.Suggest;
+            this.cmbActionTaming.AutoCompleteSource = System.Windows.Forms.AutoCompleteSource.ListItems;
             this.cmbActionTaming.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
             this.cmbActionTaming.FormattingEnabled = true;
             this.cmbActionTaming.ItemHeight = 15;
@@ -457,6 +473,8 @@
             this.cmbActionTaming.Style = DevComponents.DotNetBar.eDotNetBarStyle.StyleManagerControlled;
             this.cmbActionTaming.TabIndex = 2;
             this.cmbActionTaming.SelectedIndexChanged += new System.EventHandler(this.cmbActionTaming_SelectedIndexChanged);
+            this.cmbActionTaming.MouseDown += cmbActionTaming_MouseDown;
+            this.cmbActionTaming.KeyPress += cmbActionTaming_KeyPress;
             // 
             // cmbEmotion
             // 
@@ -464,7 +482,9 @@
             | System.Windows.Forms.AnchorStyles.Right)));
             this.cmbEmotion.DisplayMember = "Text";
             this.cmbEmotion.DrawMode = System.Windows.Forms.DrawMode.OwnerDrawFixed;
-            this.cmbEmotion.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
+            this.cmbEmotion.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDown;
+            this.cmbEmotion.AutoCompleteMode = System.Windows.Forms.AutoCompleteMode.Suggest;
+            this.cmbEmotion.AutoCompleteSource = System.Windows.Forms.AutoCompleteSource.ListItems;
             this.cmbEmotion.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
             this.cmbEmotion.FormattingEnabled = true;
             this.cmbEmotion.ItemHeight = 15;
@@ -474,6 +494,8 @@
             this.cmbEmotion.Style = DevComponents.DotNetBar.eDotNetBarStyle.StyleManagerControlled;
             this.cmbEmotion.TabIndex = 1;
             this.cmbEmotion.SelectedIndexChanged += new System.EventHandler(this.cmbEmotion_SelectedIndexChanged);
+            this.cmbEmotion.MouseDown += cmbEmotion_MouseDown;
+            this.cmbEmotion.KeyPress += cmbEmotion_KeyPress;
             // 
             // labelX3
             // 
@@ -526,7 +548,9 @@
             | System.Windows.Forms.AnchorStyles.Right)));
             this.cmbActionBody.DisplayMember = "Text";
             this.cmbActionBody.DrawMode = System.Windows.Forms.DrawMode.OwnerDrawFixed;
-            this.cmbActionBody.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
+            this.cmbActionBody.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDown;
+            this.cmbActionBody.AutoCompleteMode = System.Windows.Forms.AutoCompleteMode.Suggest;
+            this.cmbActionBody.AutoCompleteSource = System.Windows.Forms.AutoCompleteSource.ListItems;
             this.cmbActionBody.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
             this.cmbActionBody.FormattingEnabled = true;
             this.cmbActionBody.ItemHeight = 15;
@@ -536,6 +560,8 @@
             this.cmbActionBody.Style = DevComponents.DotNetBar.eDotNetBarStyle.StyleManagerControlled;
             this.cmbActionBody.TabIndex = 0;
             this.cmbActionBody.SelectedIndexChanged += new System.EventHandler(this.cmbActionBody_SelectedIndexChanged);
+            this.cmbActionBody.MouseDown += cmbActionBody_MouseDown;
+            this.cmbActionBody.KeyPress += cmbActionBody_KeyPress;
             // 
             // chkHairShade
             // 
@@ -573,7 +599,7 @@
             // 
             this.btnBodyFloating.AccessibleRole = System.Windows.Forms.AccessibleRole.PushButton;
             this.btnBodyFloating.ColorTable = DevComponents.DotNetBar.eButtonColor.OrangeWithBackground;
-            this.btnBodyFloating.Location = new System.Drawing.Point(190, 82);
+            this.btnBodyFloating.Location = new System.Drawing.Point(173, 82);
             this.btnBodyFloating.Name = "btnBodyFloating";
             this.btnBodyFloating.Size = new System.Drawing.Size(70, 20);
             this.btnBodyFloating.Style = DevComponents.DotNetBar.eDotNetBarStyle.StyleManagerControlled;
@@ -691,6 +717,119 @@
             this.cmbGroupChair.Enabled = false;
             this.cmbGroupChair.SelectedIndexChanged += new System.EventHandler(this.cmbGroupChair_SelectedIndexChanged);
             // 
+            // labelXCustomOrigin
+            // 
+            this.labelXCustomOrigin.AutoSize = true;
+            this.labelXCustomOrigin.BackColor = System.Drawing.Color.Transparent;
+            // 
+            // 
+            // 
+            this.labelXCustomOrigin.BackgroundStyle.CornerType = DevComponents.DotNetBar.eCornerType.Square;
+            this.labelXCustomOrigin.Location = new System.Drawing.Point(3, 233);
+            this.labelXCustomOrigin.Name = "labelXCustomOrigin";
+            this.labelXCustomOrigin.Size = new System.Drawing.Size(60, 18);
+            this.labelXCustomOrigin.Style = DevComponents.DotNetBar.eDotNetBarStyle.StyleManagerControlled;
+            this.labelXCustomOrigin.TabIndex = 20;
+            this.labelXCustomOrigin.Text = "커스터마이징";
+            // 
+            // labelXCustomOriginX
+            // 
+            this.labelXCustomOriginX.AutoSize = true;
+            this.labelXCustomOriginX.BackColor = System.Drawing.Color.Transparent;
+            // 
+            // 
+            // 
+            this.labelXCustomOriginX.BackgroundStyle.CornerType = DevComponents.DotNetBar.eCornerType.Square;
+            this.labelXCustomOriginX.Location = new System.Drawing.Point(3, 277);
+            this.labelXCustomOriginX.Name = "labelXCustomOriginX";
+            this.labelXCustomOriginX.Size = new System.Drawing.Size(60, 18);
+            this.labelXCustomOriginX.Style = DevComponents.DotNetBar.eDotNetBarStyle.StyleManagerControlled;
+            this.labelXCustomOriginX.TabIndex = 22;
+            this.labelXCustomOriginX.Text = "좌우";
+            // 
+            // labelXCustomOriginY
+            // 
+            this.labelXCustomOriginY.AutoSize = true;
+            this.labelXCustomOriginY.BackColor = System.Drawing.Color.Transparent;
+            // 
+            // 
+            // 
+            this.labelXCustomOriginY.BackgroundStyle.CornerType = DevComponents.DotNetBar.eCornerType.Square;
+            this.labelXCustomOriginY.Location = new System.Drawing.Point(103, 277);
+            this.labelXCustomOriginY.Name = "labelXCustomOriginY";
+            this.labelXCustomOriginY.Size = new System.Drawing.Size(60, 18);
+            this.labelXCustomOriginY.Style = DevComponents.DotNetBar.eDotNetBarStyle.StyleManagerControlled;
+            this.labelXCustomOriginY.TabIndex = 23;
+            this.labelXCustomOriginY.Text = "상하";
+            //
+            // txtCustomOriginX
+            // 
+            this.txtCustomOriginX.BackgroundStyle.Class = "DateTimeInputBackground";
+            this.txtCustomOriginX.BackgroundStyle.CornerType = DevComponents.DotNetBar.eCornerType.Square;
+            this.txtCustomOriginX.ForeColor = System.Drawing.SystemColors.ControlText;
+            this.txtCustomOriginX.IsInputReadOnly = false;
+            this.txtCustomOriginX.Location = new System.Drawing.Point(35, 275);
+            this.txtCustomOriginX.Name = "txtCustomOriginX";
+            this.txtCustomOriginX.Size = new System.Drawing.Size(60, 21);
+            this.txtCustomOriginX.TabIndex = 22;
+            this.txtCustomOriginX.Value = 0;
+            this.txtCustomOriginX.MinValue = -32768;
+            this.txtCustomOriginX.MaxValue = 32768;
+            this.txtCustomOriginX.Increment = 1;
+            this.txtCustomOriginX.ShowUpDown = true;
+            this.txtCustomOriginX.ValueChanged += TxtCustomOriginX_ValueChanged;
+            this.txtCustomOriginX.KeyDown += TxtCustomOrigin_KeyDown;
+            this.txtCustomOriginX.PreviewKeyDown += TxtCustomOrigin_PreviewKeyDown;
+            this.txtCustomOriginX.Tag = "X";
+            this.txtCustomOriginX.Enabled = false;
+            // 
+            // txtCustomOriginY
+            // 
+            this.txtCustomOriginY.BackgroundStyle.Class = "DateTimeInputBackground";
+            this.txtCustomOriginY.BackgroundStyle.CornerType = DevComponents.DotNetBar.eCornerType.Square;
+            this.txtCustomOriginY.ForeColor = System.Drawing.SystemColors.ControlText;
+            this.txtCustomOriginY.IsInputReadOnly = false;
+            this.txtCustomOriginY.Location = new System.Drawing.Point(135, 275);
+            this.txtCustomOriginY.Name = "txtCustomOriginY";
+            this.txtCustomOriginY.Size = new System.Drawing.Size(60, 21);
+            this.txtCustomOriginY.TabIndex = 23;
+            this.txtCustomOriginY.Value = 0;
+            this.txtCustomOriginY.MinValue = -32768;
+            this.txtCustomOriginY.MaxValue = 32768;
+            this.txtCustomOriginY.Increment = 1;
+            this.txtCustomOriginY.ShowUpDown = true;
+            this.txtCustomOriginY.ValueChanged += TxtCustomOriginY_ValueChanged;
+            this.txtCustomOriginY.KeyDown += TxtCustomOrigin_KeyDown;
+            this.txtCustomOriginY.PreviewKeyDown += TxtCustomOrigin_PreviewKeyDown;
+            this.txtCustomOriginY.Tag = "Y";
+            this.txtCustomOriginY.Enabled = false;
+            //
+            // chkCustomOriginObj0
+            // 
+            this.chkCustomOriginObj0.AutoSize = true;
+            this.chkCustomOriginObj0.BackColor = System.Drawing.Color.Transparent;
+            this.chkCustomOriginObj0.CheckBoxStyle = DevComponents.DotNetBar.eCheckBoxStyle.RadioButton;
+            this.chkCustomOriginObj0.Location = new System.Drawing.Point(3, 255);
+            this.chkCustomOriginObj0.Name = "chkCustomOriginObj0";
+            this.chkCustomOriginObj0.Size = new System.Drawing.Size(50, 18);
+            this.chkCustomOriginObj0.Text = "개체 1";
+            this.chkCustomOriginObj1.TabIndex = 21;
+            this.chkCustomOriginObj0.Checked = true;
+            this.chkCustomOriginObj0.CheckedChanged += ChkCustomOriginObj_ValueChanged;
+            this.chkCustomOriginObj0.Enabled = false;
+            //
+            // chkCustomOriginObj1
+            // 
+            this.chkCustomOriginObj1.AutoSize = true;
+            this.chkCustomOriginObj1.BackColor = System.Drawing.Color.Transparent;
+            this.chkCustomOriginObj1.CheckBoxStyle = DevComponents.DotNetBar.eCheckBoxStyle.RadioButton;
+            this.chkCustomOriginObj1.Location = new System.Drawing.Point(103, 255);
+            this.chkCustomOriginObj1.Name = "chkCustomOriginObj1";
+            this.chkCustomOriginObj1.Size = new System.Drawing.Size(50, 18);
+            this.chkCustomOriginObj1.Text = "개체 2";
+            this.chkCustomOriginObj1.TabIndex = 22;
+            this.chkCustomOriginObj1.Enabled = false;
+            //
             // dockContainerItem2
             // 
             this.dockContainerItem2.Control = this.panelDockContainer2;
@@ -945,5 +1084,12 @@
         private DevComponents.DotNetBar.LabelX labelX6;
         private DevComponents.DotNetBar.Controls.ComboBoxEx cmbGroupChair;
         private DevComponents.DotNetBar.ButtonX btnBodyFloating;
+        private DevComponents.DotNetBar.LabelX labelXCustomOrigin;
+        private DevComponents.DotNetBar.LabelX labelXCustomOriginX;
+        private DevComponents.DotNetBar.LabelX labelXCustomOriginY;
+        private DevComponents.Editors.IntegerInput txtCustomOriginX;
+        private DevComponents.Editors.IntegerInput txtCustomOriginY;
+        private DevComponents.DotNetBar.Controls.CheckBoxX chkCustomOriginObj0;
+        private DevComponents.DotNetBar.Controls.CheckBoxX chkCustomOriginObj1;
     }
 }

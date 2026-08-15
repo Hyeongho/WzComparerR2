@@ -768,6 +768,7 @@ namespace WzComparerR2.Comparer
                 tooltipRenderNewOld[i].LevelViewMode = SkillLevelViewMode.CurrentAndNext;
                 tooltipRenderNewOld[i].Enable22AniStyle = CharaSimConfig.Default.Misc.Enable22AniStyle;
                 tooltipRenderNewOld[i].ShowSkillValuesByJob = true;
+                tooltipRenderNewOld[i].CompareMode = true;
             }
 
             foreach (var skillID in OutputSkillTooltipIDs)
@@ -1284,8 +1285,8 @@ namespace WzComparerR2.Comparer
                     }
                     else if (RenderNew is MobTooltipRenderer)
                     {
-                        ImageNew = (RenderNew as MobTooltipRenderer).Render(true);
-                        ImageOld = (RenderOld as MobTooltipRenderer).Render(true);
+                        ImageNew = (RenderNew as MobTooltipRenderer).Render(true, (RenderOld as MobTooltipRenderer).MobInfo.ElemAttr);
+                        ImageOld = (RenderOld as MobTooltipRenderer).Render(true, (RenderNew as MobTooltipRenderer).MobInfo.ElemAttr);
                     }
                     else
                     {
@@ -1398,6 +1399,10 @@ namespace WzComparerR2.Comparer
             if (!match.Success)
             {
                 match = Regex.Match(node.FullPathToFile, @"^Skill\d*\\\d+.img\\skill\\(\d+)\\(common|masterLevel|combatOrders|action|isPetAutoBuff|isSequenceOn|BGM).*"); // 변경점 중 스킬 툴팁 출력할 것들
+                if (!match.Success)
+                {
+                    match = Regex.Match(node.FullPathToFile, @"^Skill\d*\\\d+.img\\skill\\(\d+)\\level\\\d+\\.*");
+                }
                 tag = node.Text;
             }
 
@@ -1452,12 +1457,20 @@ namespace WzComparerR2.Comparer
 
             if (!match.Success)
             {
-                match = Regex.Match(node.FullPathToFile, @"^Item\\(?:Cash|Consume|Etc|Install|Pet)\\\d+.img\\(\d+)$"); // 추가/삭제 확인
+                match = Regex.Match(node.FullPathToFile, @"^Item\\(?:Cash|Consume|Etc|Install)\\\d+.img\\(\d+)$"); // 추가/삭제 확인
+                if (!match.Success)
+                {
+                    match = Regex.Match(node.FullPathToFile, @"^Item\\(?:Pet)\\(\d+).img$");
+                }
             }
 
             if (change && !match.Success)
             {
-                match = Regex.Match(node.FullPathToFile, @"^Item\\(?:Cash|Consume|Etc|Install|Pet)\\_Canvas\\\d+.img\\(\d+)\\info\\(icon)$"); // 아이콘 변경 체크
+                match = Regex.Match(node.FullPathToFile, @"^Item\\(?:Cash|Consume|Etc|Install)\\_Canvas\\\d+.img\\(\d+)\\info\\(icon)$"); // 아이콘 변경 체크
+                if (!match.Success)
+                {
+                    match = Regex.Match(node.FullPathToFile, @"^Item\\(?:Pet)\\_Canvas\\(\d+).img\\info\\(icon)$");
+                }
             }
 
             if (match.Success)
@@ -1556,7 +1569,7 @@ namespace WzComparerR2.Comparer
 
             if (!match.Success)
             {
-                match = Regex.Match(node.FullPathToFile, @"^Mob\\(\d+).img\\info\\(level|maxHP|PDRate|MDRate|boss|exp).*"); // 변경점 중 툴팁 출력할 것들
+                match = Regex.Match(node.FullPathToFile, @"^Mob\\(\d+).img\\info\\([^\\]+)"); // 변경점 중 툴팁 출력할 것들
                 tag = node.Text;
             }
 
