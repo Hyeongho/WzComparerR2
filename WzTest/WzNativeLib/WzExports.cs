@@ -279,6 +279,13 @@ public static unsafe class WzExports
 	// outOriginX/outOriginY  : 합성 결과의 그리기 기준점 —
 	//                          AvatarCanvas.DrawFrame()의 -rect.X/-rect.Y
 	// outLen                 : 반환 바이트 수 = width*height*4 (실패 시 0)
+	// outDelayMs             : 이 frameIndex를 화면에 표시할 시간(ms) —
+	//                          AvatarCanvas.GetActionFrames(actionName)의
+	//                          frameIndex번째 ActionFrame.AbsoluteDelay
+	//                          (WZ "delay" 프로퍼티, 노드가 없으면 120ms
+	//                          기본값 — LoadActionFrameDesc과 동일한 폴백).
+	//                          찾지 못하면(frameIndex가 액션 프레임 개수를
+	//                          벗어남 등) 120 그대로 유지.
 	// 반환                   : BGRA8888 픽셀 바이트 포인터(wz_free로 해제),
 	//                          실패 시 IntPtr.Zero
 	[UnmanagedCallersOnly(EntryPoint = "wz_read_avatar")]
@@ -286,13 +293,14 @@ public static unsafe class WzExports
 		IntPtr wzPathUtf8, IntPtr loadoutSpecUtf8,
 		IntPtr actionNameUtf8, int frameIndex,
 		IntPtr emotionNameUtf8, int emotionFrameIndex,
-		int* outWidth, int* outHeight, int* outOriginX, int* outOriginY, int* outLen)
+		int* outWidth, int* outHeight, int* outOriginX, int* outOriginY, int* outLen, int* outDelayMs)
 	{
 		*outWidth = 0;
 		*outHeight = 0;
 		*outOriginX = 0;
 		*outOriginY = 0;
 		*outLen = 0;
+		*outDelayMs = 120;
 		try
 		{
 			string wzPath = Marshal.PtrToStringUTF8(wzPathUtf8) ?? throw new ArgumentNullException("wzPath");
@@ -403,6 +411,18 @@ public static unsafe class WzExports
 
 			canvas.ActionName = actionName;
 			canvas.EmotionName = emotionName;
+
+			// 프레임별 표시 시간(ms) — GetActionFrames()는 CreateFrame()과 별개로
+			// action.Name 기준 프레임 목록을 다시 훑어서 각 프레임의 "delay" WZ
+			// 프로퍼티(LoadActionFrameDesc, AvatarCanvas.cs:919)를 채워 돌려준다.
+			// CreateFrame()이 내부적으로 쓰는 ActionFrame은 이 메서드 밖으로 안
+			// 나오므로, 딜레이만 별도로 조회한다 — canvas.LoadActions()가 이미
+			// 위에서 호출됐으므로 this.Actions에 actionName이 등록돼 있어야 함.
+			ActionFrame[] actionFrames = canvas.GetActionFrames(actionName);
+			if (frameIndex >= 0 && frameIndex < actionFrames.Length)
+			{
+				*outDelayMs = actionFrames[frameIndex].AbsoluteDelay;
+			}
 
 			// 무기 자체에 내장된 기본 이펙트(총구 화염, 찌르기 잔상 등 — 무기 타입
 			// 서브폴더 안 액션/프레임 폴더에서 "weapon" png와 나란히 있는 "effect"
