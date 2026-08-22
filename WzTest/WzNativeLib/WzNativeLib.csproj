@@ -84,6 +84,10 @@
          확장 메서드 (원본 BitmapOrigin.cs도 같은 걸 씀). 확장 메서드 2개뿐인
          순수 로직 파일. -->
     <Compile Include="../../WzComparerR2.Common/Wz_NodeExtension2.cs" Link="AvatarBridge/Wz_NodeExtension2.cs" />
+    <!-- AvatarCanvas.cs가 이제 자체 ResizeBitmap 대신 BitmapUtils.ResizeBitmap을
+         쓰도록 바뀌어서(WzComparerR2.Rendering 네임스페이스) 새로 추가된 의존성 —
+         System.Drawing + BitmapOrigin만 쓰는 자기완결적 파일. -->
+    <Compile Include="../../WzComparerR2.Common/Rendering/BitmapUtils.cs" Link="AvatarBridge/Rendering/BitmapUtils.cs" />
   </ItemGroup>
 
 </Project>
