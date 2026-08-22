@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using WzComparerR2.Controls;
 using WzComparerR2.Rendering;
 using WzComparerR2.WzLib;
 
@@ -242,7 +243,64 @@ namespace WzComparerR2.Animation
                 return null;
         }
 
-        public static FrameAnimationData MergeAnimationData(FrameAnimationData baseData, FrameAnimationData addData, GraphicsDevice graphicsDevice, int delayOffset, int moveX, int moveY, int frameStart, int frameEnd)
+        private static void AppendAddFrames(FrameAnimationData anime, FrameAnimationData addData, GraphicsDevice graphicsDevice,
+            ref int addCount, int addMax,
+            List<TimelineData> alphaTimeline, ref int alphaIndex, ref int alphaDelayRemain, ref int alpha,
+            OverlayOptions options)
+        {
+            bool applyAlphaTimeline = (alphaTimeline?.Count ?? 0) > 0;
+
+            while (addCount < addMax)
+            {
+                Frame frame = addData.Frames[addCount];
+                int frameDelayRemain = frame.Delay;
+
+                while (frameDelayRemain > 0)
+                {
+                    int thisDelay = frameDelayRemain;
+                    if (applyAlphaTimeline)
+                    {
+                        thisDelay = Math.Min(thisDelay, alphaDelayRemain);
+                    }
+
+                    Texture2D texture = frame.Texture;
+                    if (texture != null && (alpha != 100 || options.Color != Color.White))
+                    {
+                        texture = CopyTexture(graphicsDevice, texture, color: options.Color, alpha: alpha);
+                    }
+
+                    Frame newFrame = new Frame(texture, frame.Origin, frame.Z, thisDelay, frame.Blend);
+
+                    anime.Frames.Add(newFrame);
+
+                    frameDelayRemain -= thisDelay;
+
+                    if (applyAlphaTimeline)
+                    {
+                        alphaDelayRemain -= thisDelay;
+                        if (alphaDelayRemain <= 0)
+                        {
+                            if (alphaIndex < alphaTimeline.Count - 1)
+                            {
+                                alphaIndex++;
+                                alpha = alphaTimeline[alphaIndex].Alpha;
+                                alphaDelayRemain = alphaTimeline[alphaIndex].Delay;
+                            }
+                            else
+                            {
+                                alphaDelayRemain = int.MaxValue;
+                            }
+                        }
+                    }
+                }
+
+                addCount++;
+            }
+        }
+
+        public static FrameAnimationData MergeAnimationData(FrameAnimationData baseData, FrameAnimationData addData, GraphicsDevice graphicsDevice,
+            int delayOffset, int moveX, int moveY, int frameStart, int frameEnd, OverlayOptions options,
+            List<TimelineData> alphaTimeline)
         {
             var anime = new FrameAnimationData();
             int baseCount = 0;
@@ -254,6 +312,11 @@ namespace WzComparerR2.Animation
             int baseDelayAll = 0;
             int addDelayAll = 0;
             int globalDelay = 0;
+
+            bool applyAlphaTimeline = (alphaTimeline?.Count ?? 0) > 0;
+            int alphaIndex = 0;
+            int alpha = applyAlphaTimeline ? alphaTimeline[0].Alpha : 100;
+            int alphaDelayRemain = applyAlphaTimeline ? alphaTimeline[0].Delay : int.MaxValue;
 
             // dispose useless textures
             for (int i = 0; i < frameStart; i++)
@@ -306,6 +369,7 @@ namespace WzComparerR2.Animation
                     anime.Frames.Add(f);
                 }
 
+                /*
                 for (int i = addCount; i < addMax; i++)
                 {
                     if (addData.Frames[i].Delay != 0)
@@ -313,6 +377,12 @@ namespace WzComparerR2.Animation
                         anime.Frames.Add(addData.Frames[i]);
                     }
                 }
+                */
+                AppendAddFrames(anime, addData, graphicsDevice,
+                    ref addCount, addMax,
+                    alphaTimeline, ref alphaIndex, ref alphaDelayRemain, ref alpha,
+                    options);
+
             }
             else // base 애니메이션 중에 add 애니메이션 재생
             {
@@ -350,16 +420,39 @@ namespace WzComparerR2.Animation
                     while (baseCount < baseMax && addCount < addMax)
                     {
                         int thisDelay = Math.Min(baseData.Frames[baseCount].Delay, addData.Frames[addCount].Delay);
+                        if (applyAlphaTimeline)
+                        {
+                            thisDelay = Math.Min(thisDelay, alphaDelayRemain);
+                        }
+
                         Point newOrigin;
                         globalDelay += thisDelay;
 
-                        Frame thisFrame = new Frame(MergeFrameTextures(baseData.Frames[baseCount], addData.Frames[addCount], graphicsDevice, out newOrigin),
+                        Frame thisFrame = new Frame(MergeFrameTextures(baseData.Frames[baseCount], addData.Frames[addCount], graphicsDevice, alpha, options, out newOrigin),
                             newOrigin, baseData.Frames[baseCount].Z, thisDelay, baseData.Frames[baseCount].Blend);
 
                         anime.Frames.Add(thisFrame);
 
                         baseData.Frames[baseCount].Delay -= thisDelay;
                         addData.Frames[addCount].Delay -= thisDelay;
+
+                        if (applyAlphaTimeline)
+                        {
+                            alphaDelayRemain -= thisDelay;
+                            if (alphaDelayRemain <= 0)
+                            {
+                                if (alphaIndex < alphaTimeline.Count - 1)
+                                {
+                                    alphaIndex++;
+                                    alpha = alphaTimeline[alphaIndex].Alpha;
+                                    alphaDelayRemain = alphaTimeline[alphaIndex].Delay;
+                                }
+                                else
+                                {
+                                    alphaDelayRemain = int.MaxValue;
+                                }
+                            }
+                        }
 
                         if (baseData.Frames[baseCount].Delay <= 0)
                         {
@@ -401,10 +494,16 @@ namespace WzComparerR2.Animation
                 }
                 else if (addCount < addMax)
                 {
+                    /*
                     for (int i = addCount; i < addMax; i++)
                     {
                         anime.Frames.Add(addData.Frames[i]);
                     }
+                    */
+                    AppendAddFrames(anime, addData, graphicsDevice,
+                        ref addCount, addMax,
+                        alphaTimeline, ref alphaIndex, ref alphaDelayRemain, ref alpha,
+                        options);
                 }
             }
 
@@ -414,7 +513,7 @@ namespace WzComparerR2.Animation
                 return null;
         }
 
-        private static Texture2D MergeFrameTextures(Frame frame1, Frame frame2, GraphicsDevice graphicsDevice, out Point newOrigin)
+        private static Texture2D MergeFrameTextures(Frame frame1, Frame frame2, GraphicsDevice graphicsDevice, int alpha2, OverlayOptions options, out Point newOrigin)
         {
             Texture2D texture1 = frame1.Texture;
             Texture2D texture2 = frame2.Texture;
@@ -422,7 +521,7 @@ namespace WzComparerR2.Animation
             if (texture1 == null)
             {
                 newOrigin = new Point(frame2.Origin.X, frame2.Origin.Y);
-                return CopyTexture(graphicsDevice, texture2);
+                return CopyTexture(graphicsDevice, texture2, color: options.Color, alpha: alpha2);
             }
             else if (texture2 == null)
             {
@@ -456,9 +555,10 @@ namespace WzComparerR2.Animation
             pngEffect.Parameters["TextureDst"].SetValue(texture1);
             pngEffect.Parameters["scaler"].SetValue(new Vector2((float)texture2.Width / texture1.Width, (float)texture2.Height / texture1.Height));
             pngEffect.Parameters["offset"].SetValue(new Vector2((float)offsetX / texture1.Width, (float)offsetY / texture1.Height));
+            pngEffect.Parameters["alpha"].SetValue(alpha2 / 100f);
 
             spriteBatch.Begin(SpriteSortMode.Immediate, BlendState.Opaque, null, null, null, pngEffect, null);
-            spriteBatch.Draw(texture2, new Vector2(newOrigin.X - frame2.Origin.X, newOrigin.Y - frame2.Origin.Y), null, Color.White, 0, Vector2.Zero, 1, SpriteEffects.None, 0);
+            spriteBatch.Draw(texture2, new Vector2(newOrigin.X - frame2.Origin.X, newOrigin.Y - frame2.Origin.Y), null, options.Color, 0, Vector2.Zero, 1, SpriteEffects.None, 0);
             spriteBatch.End();
 
             graphicsDevice.SetRenderTarget(null);
@@ -466,7 +566,9 @@ namespace WzComparerR2.Animation
             return renderTarget;
         }
 
-        private static Texture2D CopyTexture(GraphicsDevice graphicsDevice, Texture2D texture, Point newSize = default(Point), Vector2 position = default(Vector2), float rad = 0f, Vector2 origin = default(Vector2), float scale = 1f, SpriteEffects se = SpriteEffects.None)
+        private static Texture2D CopyTexture(GraphicsDevice graphicsDevice, Texture2D texture,
+            Point newSize = default(Point), Vector2 position = default(Vector2), Color? color = null, int alpha = 100, float rad = 0f, Vector2 origin = default(Vector2), float scale = 1f,
+            SpriteEffects se = SpriteEffects.None)
         {
             if (texture == null) return null;
 
@@ -484,7 +586,7 @@ namespace WzComparerR2.Animation
             graphicsDevice.SetRenderTarget(renderTarget);
             graphicsDevice.Clear(Color.Transparent);
             spriteBatch.Begin(SpriteSortMode.Immediate, BlendState.Opaque);
-            spriteBatch.Draw(texture, position, null, Color.White, rad, origin, scale, se, 0);
+            spriteBatch.Draw(texture, position, null, (color ?? Color.White) * (alpha / 100f), rad, origin, scale, se, 0);
             spriteBatch.End();
 
             graphicsDevice.SetRenderTarget(null);
