@@ -466,6 +466,39 @@ public static unsafe class WzExports
 			if (bone == null)
 				return IntPtr.Zero;
 
+			// 진단용 — 무기 파츠의 Skin.Z/ZIndex가 프레임마다 실제로 어떻게
+			// 나오는지 파일로 남긴다. AvatarCanvas.cs는 건드리지 않고(계속
+			// 벤더 코드 취급), CreateFrame()이 이미 만들어준 Bone 트리를
+			// 우리가 읽기만 한다. 실패해도 아바타 렌더링 자체에는 영향 없도록
+			// 전체를 try-catch로 감싼다 — 파츠별 레이어 순서가 프레임에 따라
+			// 안 바뀐다는 리포트의 원인(코드 버그 vs 데이터 자체가 프레임 간
+			// 무변화)을 가르기 위한 임시 진단.
+			try
+			{
+				string logPath = Path.Combine(AppContext.BaseDirectory, "wz_avatar_debug.log");
+				void WalkSkins(Bone b)
+				{
+					foreach (var skin in b.Skins)
+					{
+						if (skin.Name != null && skin.Name.StartsWith("weapon"))
+						{
+							int resolvedIndex = string.IsNullOrEmpty(skin.Z) ? int.MinValue : canvas.ZMap.IndexOf(skin.Z);
+							File.AppendAllText(logPath,
+								$"action={actionName} frame={frameIndex} skin={skin.Name} Z={skin.Z ?? "(null)"} ZIndex={skin.ZIndex} resolvedZMapIndex={resolvedIndex} zMapCount={canvas.ZMap.Count}{Environment.NewLine}");
+						}
+					}
+					foreach (var child in b.Children)
+					{
+						WalkSkins(child);
+					}
+				}
+				WalkSkins(bone);
+			}
+			catch
+			{
+				// 진단 실패는 무시 — 렌더링 경로에 영향 주면 안 됨.
+			}
+
 			BitmapOrigin bitmapOrigin = canvas.DrawFrame(bone);
 			if (bitmapOrigin.Bitmap == null)
 				return IntPtr.Zero;
