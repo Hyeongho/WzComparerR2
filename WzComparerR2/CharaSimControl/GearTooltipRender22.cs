@@ -13,6 +13,7 @@ using WzComparerR2.WzLib;
 using WzComparerR2.AvatarCommon;
 using DevComponents.DotNetBar;
 using Newtonsoft.Json.Linq;
+using WzComparerR2.Rendering;
 
 namespace WzComparerR2.CharaSimControl
 {
@@ -581,9 +582,14 @@ namespace WzComparerR2.CharaSimControl
 
                 BitmapOrigin appearance = new BitmapOrigin();
                 int morphID = android?.Nodes["info"]?.Nodes["morphID"]?.GetValueEx<int>(0) ?? 0;
+                const float MaxSampleWidth = 274f;
                 if (Gear.ToolTIpPreview.Bitmap != null)
                 {
-                    appearance = Gear.ToolTIpPreview;
+                    appearance = Gear.ToolTIpPreview.Clone();
+                    if (appearance.Bitmap.Width > MaxSampleWidth)
+                    {
+                        appearance = BitmapUtils.ResizeBitmap(appearance, MaxSampleWidth / appearance.Bitmap.Width);
+                    }
                     g.DrawImage(appearance.Bitmap, (bitmap.Width - appearance.Bitmap.Width) / 2 + 13, picH);
                     picH += appearance.Bitmap.Height;
                 }
@@ -623,6 +629,12 @@ namespace WzComparerR2.CharaSimControl
 
                     if (appearance.Bitmap != null)
                     {
+                        if (appearance.Bitmap.Width > MaxSampleWidth)
+                        {
+                            BitmapOrigin resizedAppearance = BitmapUtils.ResizeBitmap(appearance, MaxSampleWidth / appearance.Bitmap.Width);
+                            appearance.Bitmap.Dispose();
+                            appearance = resizedAppearance;
+                        }
                         g.DrawImage(appearance.Bitmap, 90 - Math.Min(appearance.Origin.X, 50), picH + Math.Max(80 - appearance.Origin.Y, 0));
                         picH += Math.Max(100, appearance.Bitmap.Height) + 2;
                     }
@@ -871,7 +883,7 @@ namespace WzComparerR2.CharaSimControl
                 hasThirdContents = true;
                 hasOptionPart = true;
 
-                DateTime time = DateTime.Now.AddDays(7d);
+                DateTime time = DateTime.Now.AddDays((Gear.Props.TryGetValue(GearPropType.masterSpecial, out value) && value > 0) ? 190d : 7d);
                 var text = $"#$e{ItemStringHelper.GetGearPropString22(GearPropType.abilityTimeLimited, value)[0]} : {time.ToString("yyyy년 M월 d일 HH시 mm분")}" +
                     $"{ItemStringHelper.GetGearPropString22(GearPropType.notExtend, value)[0]}#";
 
