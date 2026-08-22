@@ -332,18 +332,42 @@ public static unsafe class WzExports
 			var canvas = new AvatarCanvas();
 			// extractImage: true 필수 — false(기본값)면 Wz_Image.TryExtract()가
 			// 호출되지 않아 zmap.img의 자식 노드(z-순서 이름 목록)가 하나도 안
-			// 채워진 빈 노드가 반환된다. AvatarCanvas.LoadZ(Wz_Node)는 노드
-			// 자체가 null이 아니면(빈 노드라도) true를 반환하므로 이 실패가
-			// 겉으로 티가 안 나고, this.ZMap이 조용히 빈 리스트로 남는다 —
-			// GenerateLayer()가 문자열 Z를 ZMap.IndexOf()로 찾다가 전부 못 찾아
-			// (모두 -1 → ZMap.Count(=0) 또는 "default"만 0) 사실상 모든
-			// 문자열 z 레이어가 같은 ZIndex로 뭉개져서 정렬이 원래 삽입 순서에
-			// 가깝게 무너진다 — 무기가 팔 앞/뒤 중 틀린 쪽에 그려지는 등
-			// 파츠별 레이어 순서가 깨지는 증상의 원인. Body/Head/Face/Hair
-			// 파츠 로딩에서 이미 한 번 겪었던 것과 같은 종류의 버그(아래 참고,
-			// "wz_read_avatar 런타임 실패 수정 — extractImage 누락" 커밋)인데
-			// zmap.img 쪽은 그때 놓쳤다.
-			canvas.LoadZ(root.FindNodeByPath(@"Base\zmap.img", true));
+			// 채워진 빈 노드가 반환된다.
+			//
+			// "Base\zmap.img" 경로 자체가 이 브리지 구조에서는 틀렸을 수 있다 —
+			// 실제 WzComparerR2 GUI의 PluginManager.FindWz("Base\\...")는
+			// "Base"를 트리 안 폴더가 아니라 개별 .wz 파일이 등록된 레지스트리
+			// 키로 취급하는데, 우리 PluginManagerShim은 경로 전체를 CurrentRoot
+			// 하나의 트리 안 폴더 경로로 취급한다(PluginManagerShim.cs). 이전
+			// 라운드에 extractImage=true만 추가하고 "Base\" 접두사는 그대로
+			// 뒀는데도 무기 진단 로그가 zMapCount=0을 계속 보고해서, 이번엔
+			// 접두사 자체가 이 WZ 구조(KMST1125류 병합 클라이언트는 zmap.img가
+			// 원본 파일명 계층 없이 루트에 바로 있을 수 있음)와 안 맞을 가능성을
+			// 추가로 의심 — 실패하면 접두사 없이 재시도한다.
+			Wz_Node zMapNode = root.FindNodeByPath(@"Base\zmap.img", true);
+			string zMapPathTried = @"Base\zmap.img";
+			if (zMapNode == null)
+			{
+				zMapNode = root.FindNodeByPath(@"zmap.img", true);
+				zMapPathTried = @"zmap.img (Base\ 접두사 실패 후 폴백)";
+			}
+			bool zLoaded = canvas.LoadZ(zMapNode);
+
+			// 진단용 — 어느 경로로 찾았는지, 못 찾았는지/찾았는데 자식이
+			// 0개인지 구분한다. AvatarCanvas.LoadZ(Wz_Node)는 노드 자체가
+			// null이 아니면(빈 노드라도) true를 반환하므로 zMapCount=0만
+			// 봐서는 "경로가 틀림"과 "찾긴 했는데 데이터가 비어있음"을
+			// 구분할 수 없었다.
+			try
+			{
+				string logPath = Path.Combine(AppContext.BaseDirectory, "wz_avatar_debug.log");
+				File.AppendAllText(logPath,
+					$"zmap: triedPath={zMapPathTried} nodeFound={(zMapNode != null)} childCount={(zMapNode?.Nodes.Count ?? -1)} LoadZ={zLoaded} ZMap.Count={canvas.ZMap.Count}{Environment.NewLine}");
+			}
+			catch
+			{
+			}
+
 			canvas.LoadActions();
 			canvas.LoadEmotions();
 
