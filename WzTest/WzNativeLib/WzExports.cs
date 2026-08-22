@@ -330,7 +330,20 @@ public static unsafe class WzExports
 			PluginManager.CurrentRoot = root;
 
 			var canvas = new AvatarCanvas();
-			canvas.LoadZ(root.FindNodeByPath(@"Base\zmap.img"));
+			// extractImage: true 필수 — false(기본값)면 Wz_Image.TryExtract()가
+			// 호출되지 않아 zmap.img의 자식 노드(z-순서 이름 목록)가 하나도 안
+			// 채워진 빈 노드가 반환된다. AvatarCanvas.LoadZ(Wz_Node)는 노드
+			// 자체가 null이 아니면(빈 노드라도) true를 반환하므로 이 실패가
+			// 겉으로 티가 안 나고, this.ZMap이 조용히 빈 리스트로 남는다 —
+			// GenerateLayer()가 문자열 Z를 ZMap.IndexOf()로 찾다가 전부 못 찾아
+			// (모두 -1 → ZMap.Count(=0) 또는 "default"만 0) 사실상 모든
+			// 문자열 z 레이어가 같은 ZIndex로 뭉개져서 정렬이 원래 삽입 순서에
+			// 가깝게 무너진다 — 무기가 팔 앞/뒤 중 틀린 쪽에 그려지는 등
+			// 파츠별 레이어 순서가 깨지는 증상의 원인. Body/Head/Face/Hair
+			// 파츠 로딩에서 이미 한 번 겪었던 것과 같은 종류의 버그(아래 참고,
+			// "wz_read_avatar 런타임 실패 수정 — extractImage 누락" 커밋)인데
+			// zmap.img 쪽은 그때 놓쳤다.
+			canvas.LoadZ(root.FindNodeByPath(@"Base\zmap.img", true));
 			canvas.LoadActions();
 			canvas.LoadEmotions();
 
