@@ -903,6 +903,300 @@ public static unsafe class WzExports
 		}
 	}
 
+	// ── 포털 / 리액터 메타데이터 ────────────────────────────────────────────
+
+	[StructLayout(LayoutKind.Sequential, Pack = 4)]
+	public unsafe struct NativePortalItem
+	{
+		public fixed byte Pn[32];  // 포털 이름
+		public fixed byte Tn[32];  // 연결 대상 포털 이름
+		public int Index;
+		public int Pt;             // 포털 종류(PortalTypes 인덱스)
+		public int X, Y;
+		public int ToMap;          // 999999999 = 대상 없음
+		public int Image;          // game\{type}\{image} 선택자(0이면 "default")
+	}
+
+	[StructLayout(LayoutKind.Sequential, Pack = 4)]
+	public unsafe struct NativeReactorItem
+	{
+		public fixed byte Name[32];
+		public int Index;
+		public int Id;
+		public int X, Y;
+		public int F;           // 좌우 반전
+		public int ReactorTime;
+	}
+
+	// 포털 종류 이름표 — PortalItem.cs:67의 배열 그대로(인덱스 = pt).
+	// 범위를 벗어난 pt는 레거시 FrmMapRender.cs:1799처럼 건너뛴다(예외 대신).
+	private static readonly string[] PortalTypes =
+	{
+		"sp", "pi", "pv", "pc", "pg", "tp", "ps", "pgi", "psi", "pcs",
+		"ph", "psh", "pcj", "pci", "pci2", "pcig", "pshg", "pcc", "pcir"
+	};
+
+	[UnmanagedCallersOnly(EntryPoint = "wz_map_read_portals")]
+	public static IntPtr WzMapReadPortals(IntPtr wzPathUtf8, IntPtr mapPathUtf8, int* outCount)
+	{
+		*outCount = 0;
+		try
+		{
+			Wz_Node? portalRoot = FindMapNode(wzPathUtf8, mapPathUtf8)?.Nodes["portal"];
+			if (portalRoot == null)
+				return IntPtr.Zero;
+
+			var items = new List<NativePortalItem>();
+			foreach (Wz_Node node in portalRoot.Nodes)
+			{
+				NativePortalItem item = default;
+				item.Index = int.TryParse(node.Text, out int idx) ? idx : 0;
+				WriteFixedUtf8(item.Pn, 32, node.Nodes["pn"].GetValueEx<string>(null));
+				WriteFixedUtf8(item.Tn, 32, node.Nodes["tn"].GetValueEx<string>(null));
+				item.Pt = node.Nodes["pt"].GetValueEx(0);
+				item.X = node.Nodes["x"].GetValueEx(0);
+				item.Y = node.Nodes["y"].GetValueEx(0);
+				item.ToMap = node.Nodes["tm"].GetValueEx(999999999);
+				item.Image = node.Nodes["image"].GetValueEx(0);
+				items.Add(item);
+			}
+
+			return AllocArray(items, outCount);
+		}
+		catch
+		{
+			*outCount = 0;
+			return IntPtr.Zero;
+		}
+	}
+
+	[UnmanagedCallersOnly(EntryPoint = "wz_map_read_reactors")]
+	public static IntPtr WzMapReadReactors(IntPtr wzPathUtf8, IntPtr mapPathUtf8, int* outCount)
+	{
+		*outCount = 0;
+		try
+		{
+			Wz_Node? reactorRoot = FindMapNode(wzPathUtf8, mapPathUtf8)?.Nodes["reactor"];
+			if (reactorRoot == null)
+				return IntPtr.Zero;
+
+			var items = new List<NativeReactorItem>();
+			foreach (Wz_Node node in reactorRoot.Nodes)
+			{
+				NativeReactorItem item = default;
+				item.Index = int.TryParse(node.Text, out int idx) ? idx : 0;
+				WriteFixedUtf8(item.Name, 32, node.Nodes["name"].GetValueEx<string>(null));
+				item.Id = node.Nodes["id"].GetValueEx(0);
+				item.X = node.Nodes["x"].GetValueEx(0);
+				item.Y = node.Nodes["y"].GetValueEx(0);
+				item.F = node.Nodes["f"].GetValueEx(0);
+				item.ReactorTime = node.Nodes["reactorTime"].GetValueEx(0);
+				items.Add(item);
+			}
+
+			return AllocArray(items, outCount);
+		}
+		catch
+		{
+			*outCount = 0;
+			return IntPtr.Zero;
+		}
+	}
+
+	// ── 애니메이션 로딩 (wz_anim_load_*) ────────────────────────────────────
+	//
+	// 다섯 export 모두 "경로를 만들어 노드를 찾고 → MapAnimationLoader로 프레임을
+	// 해석한다"는 같은 형태이며, 경로 조립 규칙만 다르다. 경로 조립을 C++가 아니라
+	// 여기 두는 이유: 해석과 분리가 불가능하고(back의 ani 분기, 포털의 폴백 경로,
+	// 리액터의 info\link 재조회), 레퍼런스 MapData.PreloadResource 바로 옆에 있어야
+	// 규칙이 어긋났을 때 눈에 띄기 때문이다.
+	//
+	// 반환: 모든 프레임의 BGRA8888 픽셀을 이어 붙인 blob 하나(wz_free로 해제).
+	//       각 프레임은 outFrames[i].PixelOffset으로 자기 구간을 가리킨다.
+	//       outFrames도 별도 배열이라 따로 wz_free 해야 한다(아이템당 해제 2번).
+	// 실패/미지원(spine)이면 IntPtr.Zero, outMeta->FrameCount = 0.
+	private static IntPtr LoadAnimationToNative(Wz_Node? aniNode, NativeAnimMeta* outMeta, IntPtr* outFrames)
+	{
+		*outFrames = IntPtr.Zero;
+		*outMeta = default;
+
+		List<LoadedFrame>? frames = MapAnimationLoader.LoadAll(aniNode, out NativeAnimMeta meta);
+		*outMeta = meta;
+
+		if (frames == null || frames.Count == 0)
+			return IntPtr.Zero;
+
+		var frameMetas = new List<NativeAnimFrame>(frames.Count);
+		foreach (LoadedFrame f in frames)
+			frameMetas.Add(f.Meta);
+
+		int frameCount = 0;
+		*outFrames = AllocArray(frameMetas, &frameCount);
+
+		IntPtr blob = Marshal.AllocCoTaskMem(meta.PixelBytes);
+		foreach (LoadedFrame f in frames)
+		{
+			Marshal.Copy(f.Pixels!, 0, IntPtr.Add(blob, f.Meta.PixelOffset), f.Pixels!.Length);
+		}
+
+		return blob;
+	}
+
+	// MapData.cs:745-781 — aniDir은 ani 값에 따라 back / ani / spine{spineNo}.
+	[UnmanagedCallersOnly(EntryPoint = "wz_anim_load_back")]
+	public static IntPtr WzAnimLoadBack(IntPtr wzPathUtf8, IntPtr bsUtf8, int no, int ani, int spineNo, NativeAnimMeta* outMeta, IntPtr* outFrames)
+	{
+		*outFrames = IntPtr.Zero;
+		*outMeta = default;
+		try
+		{
+			string wzPath = Marshal.PtrToStringUTF8(wzPathUtf8) ?? throw new ArgumentNullException("wzPath");
+			string bS = Marshal.PtrToStringUTF8(bsUtf8) ?? "";
+			if (GetRoot(wzPath) == null || bS.Length == 0)
+				return IntPtr.Zero;
+
+			// spine back은 이번 범위 밖 — 호출자가 건너뛰도록 표시만 하고 끝낸다.
+			if (ani == 2)
+			{
+				outMeta->IsSpine = 1;
+				return IntPtr.Zero;
+			}
+
+			string aniDir = ani == 1 ? "ani" : "back";
+			string path = $@"Map\Back\{bS}.img\{aniDir}\{no}";
+			return LoadAnimationToNative(PluginManager.FindWz(path), outMeta, outFrames);
+		}
+		catch
+		{
+			return IntPtr.Zero;
+		}
+	}
+
+	// MapData.cs:783-797
+	[UnmanagedCallersOnly(EntryPoint = "wz_anim_load_obj")]
+	public static IntPtr WzAnimLoadObj(IntPtr wzPathUtf8, IntPtr osUtf8, IntPtr l0Utf8, IntPtr l1Utf8, IntPtr l2Utf8, NativeAnimMeta* outMeta, IntPtr* outFrames)
+	{
+		*outFrames = IntPtr.Zero;
+		*outMeta = default;
+		try
+		{
+			string wzPath = Marshal.PtrToStringUTF8(wzPathUtf8) ?? throw new ArgumentNullException("wzPath");
+			string oS = Marshal.PtrToStringUTF8(osUtf8) ?? "";
+			string l0 = Marshal.PtrToStringUTF8(l0Utf8) ?? "";
+			string l1 = Marshal.PtrToStringUTF8(l1Utf8) ?? "";
+			string l2 = Marshal.PtrToStringUTF8(l2Utf8) ?? "";
+			if (GetRoot(wzPath) == null || oS.Length == 0)
+				return IntPtr.Zero;
+
+			string path = $@"Map\Obj\{oS}.img\{l0}\{l1}\{l2}";
+			return LoadAnimationToNative(PluginManager.FindWz(path), outMeta, outFrames);
+		}
+		catch
+		{
+			return IntPtr.Zero;
+		}
+	}
+
+	// MapData.cs:799-807 — 레이어 인덱스는 경로에 들어가지 않는다(tS\u\no 뿐).
+	[UnmanagedCallersOnly(EntryPoint = "wz_anim_load_tile")]
+	public static IntPtr WzAnimLoadTile(IntPtr wzPathUtf8, IntPtr tsUtf8, IntPtr uUtf8, int no, NativeAnimMeta* outMeta, IntPtr* outFrames)
+	{
+		*outFrames = IntPtr.Zero;
+		*outMeta = default;
+		try
+		{
+			string wzPath = Marshal.PtrToStringUTF8(wzPathUtf8) ?? throw new ArgumentNullException("wzPath");
+			string tS = Marshal.PtrToStringUTF8(tsUtf8) ?? "";
+			string u = Marshal.PtrToStringUTF8(uUtf8) ?? "";
+			if (GetRoot(wzPath) == null || tS.Length == 0 || u.Length == 0)
+				return IntPtr.Zero;
+
+			string path = $@"Map\Tile\{tS}.img\{u}\{no}";
+			return LoadAnimationToNative(PluginManager.FindWz(path), outMeta, outFrames);
+		}
+		catch
+		{
+			return IntPtr.Zero;
+		}
+	}
+
+	// MapData.cs:901-966 — game 뷰 경로. pt==7(pgi)은 의도적으로 2(pv)의 그림을 쓴다.
+	// {image} 단계가 없는 포털도 있어서 그 경우 상위 노드 자체를 애니메이션으로 쓴다.
+	//
+	// 레퍼런스와의 의도적 차이: portalStart/portalContinue/portalExit 3단 상태머신
+	// 포털은 에디터에서 커서가 근처에 올 때만 보이지만(StateMachineAnimator의 초기
+	// 상태가 -1), 게임에는 커서 포커스 개념이 없으므로 portalContinue를 루프 재생한다.
+	[UnmanagedCallersOnly(EntryPoint = "wz_anim_load_portal")]
+	public static IntPtr WzAnimLoadPortal(IntPtr wzPathUtf8, int pt, int image, NativeAnimMeta* outMeta, IntPtr* outFrames)
+	{
+		*outFrames = IntPtr.Zero;
+		*outMeta = default;
+		try
+		{
+			string wzPath = Marshal.PtrToStringUTF8(wzPathUtf8) ?? throw new ArgumentNullException("wzPath");
+			if (GetRoot(wzPath) == null)
+				return IntPtr.Zero;
+
+			if (pt < 0 || pt >= PortalTypes.Length)
+				return IntPtr.Zero;
+
+			string typeName = PortalTypes[pt == 7 ? 2 : pt];
+			string imgName = image == 0 ? "default" : image.ToString();
+
+			Wz_Node? aniNode = PluginManager.FindWz($@"Map\MapHelper.img\portal\game\{typeName}\{imgName}")
+							   ?? PluginManager.FindWz($@"Map\MapHelper.img\portal\game\{typeName}");
+			if (aniNode == null)
+				return IntPtr.Zero; // 게임 뷰 에셋이 없는 종류(sp, pi 등)는 안 그린다.
+
+			// 3단 상태머신 포털이면 반복 구간만 재생한다.
+			Wz_Node? continueNode = aniNode.Nodes["portalContinue"];
+			if (continueNode != null)
+				aniNode = continueNode;
+
+			return LoadAnimationToNative(aniNode, outMeta, outFrames);
+		}
+		catch
+		{
+			return IntPtr.Zero;
+		}
+	}
+
+	// MapData.cs:1003-1049 — info\link가 있으면 그 id의 img로 갈아탄 뒤
+	// 정수 이름의 상태 노드("0","1",…) 중 stage를 고른다. 리액터 상태는 기본 반복.
+	[UnmanagedCallersOnly(EntryPoint = "wz_anim_load_reactor")]
+	public static IntPtr WzAnimLoadReactor(IntPtr wzPathUtf8, int id, int stage, NativeAnimMeta* outMeta, IntPtr* outFrames)
+	{
+		*outFrames = IntPtr.Zero;
+		*outMeta = default;
+		try
+		{
+			string wzPath = Marshal.PtrToStringUTF8(wzPathUtf8) ?? throw new ArgumentNullException("wzPath");
+			if (GetRoot(wzPath) == null)
+				return IntPtr.Zero;
+
+			Wz_Node? reactorNode = PluginManager.FindWz($@"Reactor\{id:D7}.img");
+			int? link = reactorNode?.FindNodeByPath(@"info\link").GetValueEx<int>();
+			if (link != null)
+			{
+				reactorNode = PluginManager.FindWz($@"Reactor\{link.Value:D7}.img");
+			}
+
+			Wz_Node? stateNode = reactorNode?.Nodes[stage.ToString()];
+			if (stateNode == null)
+				return IntPtr.Zero;
+
+			IntPtr blob = LoadAnimationToNative(stateNode, outMeta, outFrames);
+			// MapData.cs:1026 "ani2.Repeat = ani.Repeat ?? true" — 리액터 상태는
+			// repeat 노드가 없어도 기본 반복이다.
+			outMeta->Repeat = 1;
+			return blob;
+		}
+		catch
+		{
+			return IntPtr.Zero;
+		}
+	}
+
 	// Character.wz 하위(카테고리 폴더 한 단계 + 그 안쪽 한 단계, _Canvas 폴더는
 	// 건너뜀)에서 "{id:D8}.img" 이름을 재귀 탐색한다.
 	// AvatarCanvasManager.FindNodeByGearID와 동일한 탐색 방식.
