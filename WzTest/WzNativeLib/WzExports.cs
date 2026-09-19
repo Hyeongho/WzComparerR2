@@ -143,18 +143,7 @@ public static unsafe class WzExports
 			else
 			{
 				// wzPath = WZ 파일 또는 폴더, imgPath = 내부 노드 경로 (백슬래시 구분)
-				Wz_Node? root;
-				if (Directory.Exists(wzPath))
-				{
-					var structure = new Wz_Structure();
-					Wz_Node? rootNode = null;
-					structure.LoadWzFolder(wzPath, ref rootNode, false);
-					root = rootNode ?? structure.WzNode;
-				}
-				else
-				{
-					root = OpenWzPathAndGetRoot(wzPath);
-				}
+				Wz_Node? root = GetRoot(wzPath);
 
 				// FindNodeByPath(string, bool) → 내부에서 '\' 로 분리 (Wz_Node.cs:121)
 				Wz_Node? found = root?.FindNodeByPath(imgPath, false);
@@ -217,18 +206,7 @@ public static unsafe class WzExports
 			string wzPath = Marshal.PtrToStringUTF8(wzPathUtf8) ?? throw new ArgumentNullException("wzPath");
 			string nodePath = Marshal.PtrToStringUTF8(nodePathUtf8) ?? throw new ArgumentNullException("nodePath");
 
-			Wz_Node? root;
-			if (Directory.Exists(wzPath))
-			{
-				var structure = new Wz_Structure();
-				Wz_Node? rootNode = null;
-				structure.LoadWzFolder(wzPath, ref rootNode, false);
-				root = rootNode ?? structure.WzNode;
-			}
-			else
-			{
-				root = OpenWzPathAndGetRoot(wzPath);
-			}
+			Wz_Node? root = GetRoot(wzPath);
 
 			// extractImage: true — IMG 내부까지 자동으로 파고들며 프로퍼티를 추출한다.
 			Wz_Node? found = root?.FindNodeByPath(nodePath, true);
@@ -328,26 +306,14 @@ public static unsafe class WzExports
 			string actionName = Marshal.PtrToStringUTF8(actionNameUtf8) ?? "stand1";
 			string emotionName = Marshal.PtrToStringUTF8(emotionNameUtf8) ?? "default";
 
-			Wz_Node? root;
-			if (Directory.Exists(wzPath))
-			{
-				var structure = new Wz_Structure();
-				Wz_Node? rootNode = null;
-				structure.LoadWzFolder(wzPath, ref rootNode, false);
-				root = rootNode ?? structure.WzNode;
-			}
-			else
-			{
-				root = OpenWzPathAndGetRoot(wzPath);
-			}
+			// GetRoot()가 PluginManager.CurrentRoot까지 세팅해준다 — AvatarCommon
+			// 소스 내부의 PluginManager.FindWz 호출들(LoadActions/LoadEmotions/
+			// AvatarPart의 아이콘 로딩 등)이 이 루트를 쓴다.
+			// (PluginManagerShim.cs — 실제 GUI PluginBase 프로젝트는 링크하지 않음.)
+			Wz_Node? root = GetRoot(wzPath);
 
 			if (root == null)
 				return IntPtr.Zero;
-
-			// AvatarCommon 소스 내부의 PluginManager.FindWz 호출들(LoadActions/
-			// LoadEmotions/AvatarPart의 아이콘 로딩 등)이 이 루트를 쓰도록 연결.
-			// (PluginManagerShim.cs — 실제 GUI PluginBase 프로젝트는 링크하지 않음.)
-			PluginManager.CurrentRoot = root;
 
 			var canvas = new AvatarCanvas();
 			// extractImage: true 필수 — false(기본값)면 Wz_Image.TryExtract()가
@@ -607,27 +573,38 @@ public static unsafe class WzExports
 		public int VRLeft, VRTop, VRRight, VRBottom;
 	}
 
+	// Index(= WZ 슬롯 번호, 노드 이름을 정수로 파싱한 값)는 정렬 2차 키로 쓰인다.
+	// MapRender의 MeshItem.Z1이 바로 이 값이며(FrmMapRender2.SceneRendering.cs의
+	// GetMeshBack/Tile/Obj), 배열에 담긴 순서가 아니라 WZ가 매긴 번호여야 한다.
 	[StructLayout(LayoutKind.Sequential, Pack = 4)]
 	public unsafe struct NativeMapBackItem
 	{
 		public fixed byte Bs[32];
+		public int Index;
 		public int No;
-		public int Ani;   // 0=정적("back"), 1=애니메이션("ani", 프레임 반복 조회 필요)
+		public int Ani;   // 0=정적("back"), 1=애니메이션("ani"), 2=spine(미지원)
+		public int SpineNo;
 		public int Front; // 0=맵 레이어보다 뒤, 1=맵 레이어보다 앞
 		public int F;     // 좌우 반전
 		public int X, Y;
-		public int Rx, Ry; // 타일링 반복 간격(0이면 반복 없음)
-		public int Type;   // 0=없음,1=가로,2=세로,3=가로+세로 (+4~7은 스크롤 변형)
-		public int Cx, Cy; // 타일링 셀 크기
+		public int Rx, Ry; // 카메라 이동 비율(파라랙스) — 0이면 화면 고정, -100이면 월드 고정
+		public int Type;   // TileMode: 1=가로,2=세로,3=가로+세로,4=가로스크롤,5=세로스크롤…
+		public int Cx, Cy; // 타일링 셀 크기(0이면 프레임 Bounds 크기로 대체)
 		public int A;      // 알파(0~255)
+		public int W;      // 0이 아니면 Wx/Wy를 스크롤 거리(distance)로 사용
+		public int Wx, Wy; // 스크롤 거리(W가 0이거나 값이 0이면 기본 100)
+		public int ScreenMode;
 	}
 
 	[StructLayout(LayoutKind.Sequential, Pack = 4)]
 	public unsafe struct NativeMapTileItem
 	{
 		public fixed byte U[32]; // 타일 조각 이름(예: "bsc","enH1")
+		public int Index;
 		public int No;
 		public int X, Y;
+		// zM은 MapRender2가 정렬에 쓰지 않는다(레거시 FrmMapRender에만 남아있고
+		// 거기서도 "not use for sort" 주석이 달려 있음) — 원본 보존용으로만 둔다.
 		public int Zm;
 	}
 
@@ -638,6 +615,7 @@ public static unsafe class WzExports
 		public fixed byte L0[32];
 		public fixed byte L1[32];
 		public fixed byte L2[32];
+		public int Index;
 		public int X, Y, Z, Zm, F;
 	}
 
@@ -698,18 +676,7 @@ public static unsafe class WzExports
 		string wzPath = Marshal.PtrToStringUTF8(wzPathUtf8) ?? throw new ArgumentNullException("wzPath");
 		string mapPath = Marshal.PtrToStringUTF8(mapPathUtf8) ?? throw new ArgumentNullException("mapPath");
 
-		Wz_Node? root;
-		if (Directory.Exists(wzPath))
-		{
-			var structure = new Wz_Structure();
-			Wz_Node? rootNode = null;
-			structure.LoadWzFolder(wzPath, ref rootNode, false);
-			root = rootNode ?? structure.WzNode;
-		}
-		else
-		{
-			root = OpenWzPathAndGetRoot(wzPath);
-		}
+		Wz_Node? root = GetRoot(wzPath);
 
 		return root?.FindNodeByPath(mapPath, true);
 	}
@@ -758,8 +725,10 @@ public static unsafe class WzExports
 			{
 				NativeMapBackItem item = default;
 				WriteFixedUtf8(item.Bs, 32, node.Nodes["bS"].GetValueEx<string>(null));
+				item.Index = int.TryParse(node.Text, out int backIndex) ? backIndex : 0;
 				item.No = node.Nodes["no"].GetValueEx(0);
 				item.Ani = node.Nodes["ani"].GetValueEx(0);
+				item.SpineNo = node.Nodes["spineNo"].GetValueEx(0);
 				item.Front = node.Nodes["front"].GetValueEx(0);
 				item.F = node.Nodes["f"].GetValueEx(0);
 				item.X = node.Nodes["x"].GetValueEx(0);
@@ -770,6 +739,10 @@ public static unsafe class WzExports
 				item.Cx = node.Nodes["cx"].GetValueEx(0);
 				item.Cy = node.Nodes["cy"].GetValueEx(0);
 				item.A = node.Nodes["a"].GetValueEx(255);
+				item.W = node.Nodes["w"].GetValueEx(0);
+				item.Wx = node.Nodes["wx"].GetValueEx(0);
+				item.Wy = node.Nodes["wy"].GetValueEx(0);
+				item.ScreenMode = node.Nodes["screenMode"].GetValueEx(0);
 				items.Add(item);
 			}
 
@@ -829,6 +802,7 @@ public static unsafe class WzExports
 				{
 					NativeMapTileItem item = default;
 					WriteFixedUtf8(item.U, 32, node.Nodes["u"].GetValueEx<string>(null));
+					item.Index = int.TryParse(node.Text, out int tileIndex) ? tileIndex : 0;
 					item.No = node.Nodes["no"].GetValueEx(0);
 					item.X = node.Nodes["x"].GetValueEx(0);
 					item.Y = node.Nodes["y"].GetValueEx(0);
@@ -849,6 +823,7 @@ public static unsafe class WzExports
 					WriteFixedUtf8(item.L0, 32, node.Nodes["l0"].GetValueEx<string>(null));
 					WriteFixedUtf8(item.L1, 32, node.Nodes["l1"].GetValueEx<string>(null));
 					WriteFixedUtf8(item.L2, 32, node.Nodes["l2"].GetValueEx<string>(null));
+					item.Index = int.TryParse(node.Text, out int objIndex) ? objIndex : 0;
 					item.X = node.Nodes["x"].GetValueEx(0);
 					item.Y = node.Nodes["y"].GetValueEx(0);
 					item.Z = node.Nodes["z"].GetValueEx(0);
@@ -981,6 +956,47 @@ public static unsafe class WzExports
 	}
 
 	// ── 내부 헬퍼 ────────────────────────────────────────────────────────────
+
+	// 마지막으로 연 WZ 루트를 경로 기준으로 캐시한다.
+	//
+	// 캐시가 없으면 export를 부를 때마다 아카이브를 통째로 다시 연다 — 맵 하나에
+	// 타일·오브젝트가 수백 개이고 각각이 캔버스 로딩을 유발하므로, 캐시 없이는
+	// 같은 WZ를 수백 번 재오픈하게 된다.
+	//
+	// 또한 여기서 항상 PluginManager.CurrentRoot를 세팅한다 — AvatarCommon과
+	// Wz_NodeExtension2.GetLinkedSourceNode(_outlink/source 해석)가 전부
+	// PluginManager.FindWz를 거치고, 그 구현(PluginManagerShim.cs)이 이 값을
+	// 기준으로 동작하기 때문이다. 예전엔 wz_read_avatar만 세팅해서, 맵 로딩
+	// 경로에서는 링크 해석이 항상 null로 떨어졌다.
+	private static string? s_CachedWzPath;
+	private static Wz_Node? s_CachedRoot;
+
+	private static Wz_Node? GetRoot(string wzPath)
+	{
+		if (s_CachedRoot != null && string.Equals(s_CachedWzPath, wzPath, StringComparison.OrdinalIgnoreCase))
+		{
+			PluginManager.CurrentRoot = s_CachedRoot;
+			return s_CachedRoot;
+		}
+
+		Wz_Node? root;
+		if (Directory.Exists(wzPath))
+		{
+			var structure = new Wz_Structure();
+			Wz_Node? rootNode = null;
+			structure.LoadWzFolder(wzPath, ref rootNode, false);
+			root = rootNode ?? structure.WzNode;
+		}
+		else
+		{
+			root = OpenWzPathAndGetRoot(wzPath);
+		}
+
+		s_CachedWzPath = wzPath;
+		s_CachedRoot = root;
+		PluginManager.CurrentRoot = root;
+		return root;
+	}
 
 	// wz_open의 파일 형식 자동 감지 로직(원래 여기에만 있었음)을 wz_read_img /
 	// wz_read_canvas도 공유하도록 추출한 헬퍼. 이게 없으면 저 두 함수는
