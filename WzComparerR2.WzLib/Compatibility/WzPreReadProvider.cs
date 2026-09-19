@@ -169,8 +169,11 @@ namespace WzComparerR2.WzLib.Compatibility
         public bool TryPreRead(Wz_File wzFile, out WzPreReadResult result)
         {
             bool succeeded = Pkg2PreReadTreeWalker.TryPreRead(wzFile, rule, out result);
-            result?.EntryNamePosition = rule.EntryNamePosition;
-            result?.use8ByteKey = wzFile.Header.HeaderSize == 353;
+            if (result != null)
+            {
+                result.EntryNamePosition = rule.EntryNamePosition;
+                result.use8ByteKey = wzFile.Header.HeaderSize == 353;
+            }
             return succeeded;
         }
     }
