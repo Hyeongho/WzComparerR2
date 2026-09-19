@@ -52,6 +52,11 @@ namespace WzComparerR2.WzLib.Utilities
             return (s == -128) ? this.bReader.ReadInt32() : s;
         }
 
+        public uint ReadCompressedUInt32()
+        {
+            return (uint)this.ReadCompressedInt32();
+        }
+
         public int ReadInt32()
         {
             return this.bReader.ReadInt32();
@@ -75,8 +80,9 @@ namespace WzComparerR2.WzLib.Utilities
 
         public float ReadCompressedSingle()
         {
-            float fl = this.bReader.ReadSByte();
-            return (fl == -128) ? this.bReader.ReadSingle() : fl;
+            Span<int> bits = stackalloc int[1];
+            bits[0] = this.ReadCompressedInt32();
+            return MemoryMarshal.Cast<int, float>(bits)[0];
         }
 
         public double ReadDouble()
@@ -107,7 +113,7 @@ namespace WzComparerR2.WzLib.Utilities
 
                     using var charBuffer = MemoryPool<char>.Shared.Rent(size);
                     Span<char> chars = charBuffer.Memory.Span.Slice(0, size);
-                    MathHelper.XorWidenToChar(buffer.AsSpan(0, size), chars);
+                    MathHelper.DecodeWzStringAscii(buffer.AsSpan(0, size), chars);
                     return this.stringPool != null ? this.stringPool.GetOrAdd(currentPos, chars) : chars.ToString();
                 }
                 finally
@@ -129,7 +135,7 @@ namespace WzComparerR2.WzLib.Utilities
                     decrypter.Decrypt(buffer.AsSpan(0, byteSize));
 
                     Span<char> chars = MemoryMarshal.Cast<byte, char>(buffer.AsSpan(0, byteSize));
-                    MathHelper.XorChars(chars, chars);
+                    MathHelper.ApplyWzStringCharMask(chars, chars);
                     return this.stringPool != null ? this.stringPool.GetOrAdd(currentPos, chars) : chars.ToString();
                 }
                 finally
@@ -256,7 +262,7 @@ namespace WzComparerR2.WzLib.Utilities
             return ret;
         }
 
-        public string ForceReadPkg2DirString(byte nodeType, string fullpath = null, bool read2bytes = false)
+        public string ForceReadPkg2DirString(byte nodeType, string fullpath = null, bool read2bytes = false, bool use8ByteKey = false)
         {
             long currentPos = this.BaseStream.Position;
 
@@ -273,6 +279,26 @@ namespace WzComparerR2.WzLib.Utilities
                     byte keyByte = 157;
                     if (nodeType == 0x04)
                     {
+                        if (use8ByteKey)
+                        {
+                            char[] code = { '.', 'i', 'm', 'g' };
+                            for (int j = 0; j < code.Length; j++)
+                            {
+                                int suffixIndex = size - code.Length + j;
+                                int hintIndex = suffixIndex - 8;
+                                if (hintIndex >= 0)
+                                {
+                                    keyByte = (byte)(buffer[suffixIndex * 2] ^ code[j]);
+                                    result[hintIndex] = (char)(buffer[hintIndex * 2] ^ keyByte);
+                                }
+                            }
+
+                            if (ImgNameContainer.TryTake(fullpath, size, result, out string name))
+                            {
+                                return name;
+                            }
+                            else return "??.img";
+                        }
                         if (size > 4)
                         {
                             char[] code = { '.', 'i', 'm', 'g' };

@@ -56,7 +56,7 @@ namespace WzComparerR2.WzLib.Compatibility
         /// </summary>
         public static Pkg1VersionIterator CreateFixed(int wzVersion)
         {
-            return new Pkg1VersionIterator(wzVersion, Wz_Header.CalcHashVersion(wzVersion));
+            return new Pkg1VersionIterator(wzVersion, WzVersionHasher.ComputePkg1HashVersion(wzVersion));
         }
 
         private bool IsFixed => this.fixedWzVersion >= 0;
@@ -89,7 +89,7 @@ namespace WzComparerR2.WzLib.Compatibility
 
             for (int i = startVersion + 1; i < short.MaxValue; i++)
             {
-                uint sum = Wz_Header.CalcHashVersion(i);
+                uint sum = WzVersionHasher.ComputePkg1HashVersion(i);
                 if (CalcEncryptedVersion(sum) == (uint)this.encryptedVersion)
                 {
                     WzVersion = i;
@@ -431,7 +431,7 @@ namespace WzComparerR2.WzLib.Compatibility
     }
 
     /// <summary>
-    /// 64-bit PKG2 hash version calculation for KMST 1202.
+    /// 64-bit PKG2 hash version calculation for KMST 1202-1204.
     /// </summary>
     public sealed class Pkg2HashVersionCalc64V1 : IPkg2HashVersionCalc<ulong>
     {
@@ -445,6 +445,50 @@ namespace WzComparerR2.WzLib.Compatibility
         public bool Verify(ulong hash1, ulong hash2, ulong hashVersion)
         {
             return hashVersion == (hash1 ^ hash2 ^ Magic);
+        }
+    }
+
+    /// <summary>
+    /// 64-bit PKG2 hash version calculation for KMST 1205.
+    /// </summary>
+    public sealed class Pkg2HashVersionCalc64V2 : IPkg2HashVersionCalc<ulong>
+    {
+        private const string VersionString = "v410_260106_1_A1F3C9E2";
+
+        public IReadOnlyList<ulong> CalcCandidates(ulong hash1, ulong hash2)
+        {
+            ulong knownHashVersion = WzVersionHasher.ComputePkg2HashVersion1202(VersionString);
+            if (this.Verify(hash1, hash2, knownHashVersion))
+                return new[] { knownHashVersion };
+            return Array.Empty<ulong>();
+        }
+
+        public bool Verify(ulong hash1, ulong hash2, ulong hashVersion)
+        {
+            return Pkg2Kmst1205Hash.ComputeHash2(hash1, hashVersion) == hash2;
+        }
+    }
+
+    /// <summary>
+    /// 64-bit PKG2 hash version calculation for KMST 1206.
+    /// </summary>
+    public sealed class Pkg2HashVersionCalc64V3 : IPkg2HashVersionCalc<ulong>
+    {
+        private const string VersionString = "v410_260106_1_A1F3C9E2";
+
+        public IReadOnlyList<ulong> CalcCandidates(ulong hash1, ulong hash2)
+        {
+            ulong hashVersion = WzVersionHasher.ComputePkg2HashVersion1206(VersionString);
+            return Pkg2Kmst1205Hash.ComputeHash2(hash1, hashVersion) == hash2
+                ? new[] { hashVersion }
+                : Array.Empty<ulong>();
+        }
+
+        public bool Verify(ulong hash1, ulong hash2, ulong hashVersion)
+        {
+            ulong expectedHashVersion = WzVersionHasher.ComputePkg2HashVersion1206(VersionString);
+            return hashVersion == expectedHashVersion
+                && Pkg2Kmst1205Hash.ComputeHash2(hash1, expectedHashVersion) == hash2;
         }
     }
 

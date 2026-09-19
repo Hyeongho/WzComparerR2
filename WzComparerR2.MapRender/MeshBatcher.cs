@@ -395,7 +395,22 @@ namespace WzComparerR2.MapRender
         private void DrawItem(MeshItem mesh, MsCustomSprite msCustomSprite)
         {
             Prepare(ItemType.MsSprite);
-            this.msSpriteRenderer.Draw(mesh.Position, msCustomSprite.Size, msCustomSprite.Material);
+            if (mesh.TileRegion != null)
+            {
+                var region = mesh.TileRegion.Value;
+                for (int y = region.Top; y < region.Bottom; y++)
+                {
+                    for (int x = region.Left; x < region.Right; x++)
+                    {
+                        Vector2 pos = mesh.Position + mesh.TileOffset * new Vector2(x, y);
+                        this.msSpriteRenderer.Draw(pos, msCustomSprite.Size, msCustomSprite.Material);
+                    }
+                }
+            }
+            else
+            {
+                this.msSpriteRenderer.Draw(mesh.Position, msCustomSprite.Size, msCustomSprite.Material);
+            }
         }
 
         public Rectangle[] Measure(MeshItem mesh)
@@ -469,6 +484,18 @@ namespace WzComparerR2.MapRender
 
             rect.X += (int)mesh.Position.X;
             rect.Y += (int)mesh.Position.Y;
+
+            // 클릭 가능 영역 보정
+            if (rect.Width <= 10)
+            {
+                rect.X -= rect.Width / 2;
+                rect.Width = 10;
+            }
+            if (rect.Height <= 10)
+            {
+                rect.Y -= rect.Height / 2;
+                rect.Height = 10;
+            }
 
             if (mesh.TileRegion != null)
             {

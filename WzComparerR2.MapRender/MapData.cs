@@ -726,6 +726,10 @@ namespace WzComparerR2.MapRender
                         {
                             PreloadResource(resLoader, (SkillItem)item);
                         }
+                        else if (item is DraggableAniItem)
+                        {
+                            PreloadResource(resLoader, (DraggableAniItem)item);
+                        }
                     }
                 }
 
@@ -749,11 +753,30 @@ namespace WzComparerR2.MapRender
                 default: throw new Exception($"Unknown back ani value: {back.Ani}.");
             }
             string path = $@"Map\Back\{back.BS}.img\{aniDir}\{back.No}";
-            var aniItem = resLoader.LoadAnimationData(path);
+            var aniNode = PluginManager.FindWz(path)?.ResolveUol();
+            var aniItem = aniNode != null ? resLoader.LoadAnimationData(aniNode) : null;
+            var animator = CreateAnimator(aniItem, back.SpineAni);
+
+            Rectangle bounds = Rectangle.Empty;
+            switch (animator)
+            {
+                case FrameAnimator frameAnimator:
+                    bounds = frameAnimator.Data.GetBound();
+                    break;
+                case WzComparerR2.Controls.AnimationItem animationItem:
+                    bounds = animationItem.Measure();
+                    break;
+                case MsCustomSprite msCustomSprite:
+                    bounds = new Rectangle(Point.Zero, msCustomSprite.Size.ToPoint());
+                    break;
+            }
 
             back.View = new BackItem.ItemView()
             {
-                Animator = CreateAnimator(aniItem, back.SpineAni)
+                Animator = animator,
+                FlowX = aniNode?.Nodes["flowX"]?.GetValueEx(0),
+                FlowY = aniNode?.Nodes["flowY"]?.GetValueEx(0),
+                Bounds = bounds,
             };
         }
 
@@ -1074,6 +1097,15 @@ namespace WzComparerR2.MapRender
             };
         }
 
+        private void PreloadResource(ResourceLoader resLoader, DraggableAniItem ani)
+        {
+            var aniItem = resLoader.LoadAnimationData(ani.AniNode);
+            ani.View = new DraggableAniItem.ItemView()
+            {
+                Animator = CreateAnimator(aniItem),
+            };
+        }
+
         public void LoadResource(ResourceLoader resLoader, SceneItem item)
         {
             if (item is BackItem)
@@ -1111,6 +1143,10 @@ namespace WzComparerR2.MapRender
             else if (item is SkillItem)
             {
                 PreloadResource(resLoader, (SkillItem)item);
+            }
+            else if (item is DraggableAniItem)
+            {
+                PreloadResource(resLoader, (DraggableAniItem)item);
             }
         }
 
@@ -1577,9 +1613,23 @@ namespace WzComparerR2.MapRender
             else return false;
         }
 
-        public void UnsummonSkill(SkillItem skill)
+        public bool SummonDraggableAniItem(string aniPath, int x, int y, bool flip)
         {
-            RequestRemoveFromLayer(skill);
+            var aniNode = PluginManager.FindWz(aniPath);
+            var zindex = Scene.Fly.Skill.Slots.Count > 0 ? Scene.Fly.Skill.Slots.Max(s => s.Index) + 1 : 0;
+            DraggableAniItem obj = DraggableAniItem.Create(x, y, index: zindex, flip, aniNode);
+            if (aniNode != null && obj != null)
+            {
+                LoadSceneItemResource?.Invoke(obj);
+                RequestAddToLayer(obj);
+                return true;
+            }
+            else return false;
+        }
+
+        public void UnsummonDraggableItem(DraggableItem drag)
+        {
+            RequestRemoveFromLayer(drag);
         }
 
         private void RequestMoveLayer(LifeItem lifeItem, int prev, int next)
@@ -1596,11 +1646,11 @@ namespace WzComparerR2.MapRender
             addToLayerQueue.Add(new Tuple<SceneItem, int>(lifeItem, foothold));
         }
 
-        private void RequestAddToLayer(SkillItem skillItem)
+        private void RequestAddToLayer(DraggableItem drag)
         {
-            if (skillItem == null) return;
+            if (drag == null) return;
 
-            addToLayerQueue.Add(new Tuple<SceneItem, int>(skillItem, 0));
+            addToLayerQueue.Add(new Tuple<SceneItem, int>(drag, 0));
         }
 
         private void RequestRemoveFromLayer(SceneItem sceneItem)
@@ -1665,7 +1715,7 @@ namespace WzComparerR2.MapRender
             {
                 SceneItem target = task.Item1;
                 int foothold = task.Item2;
-                if (target is LifeItem life)
+                if (target is LifeItem)
                 {
                     ContainerNode<FootholdItem> fhNode;
                     if (foothold != -1 && (fhNode = FindFootholdByID(foothold)) != null)
@@ -1677,7 +1727,7 @@ namespace WzComparerR2.MapRender
                         Scene.Fly.Sky.Slots.Add(target);
                     }
                 }
-                else if (target is SkillItem skill)
+                else if (target is DraggableItem)
                 {
                     Scene.Fly.Skill.Slots.Add(target);
                 }
@@ -1698,7 +1748,7 @@ namespace WzComparerR2.MapRender
                     }
                     Scene.Fly.Sky.Slots.Remove(target);
                 }
-                else if (target is SkillItem skill)
+                else if (target is DraggableItem)
                 {
                     Scene.Fly.Skill.Slots.Remove(target);
                 }

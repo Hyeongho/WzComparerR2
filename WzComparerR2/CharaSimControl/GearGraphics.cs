@@ -303,6 +303,7 @@ namespace WzComparerR2.CharaSimControl
 
         public static readonly Brush BarrierArcBrush = new SolidBrush(Color.FromArgb(218, 161, 255));
         public static readonly Brush BarrierAutBrush = new SolidBrush(Color.FromArgb(218, 161, 255));
+        public static readonly Brush MapBgmBrush = new SolidBrush(Color.FromArgb(100, 237, 46));
 
         public static readonly Brush LocationBrush = new SolidBrush(Color.FromArgb(209, 255, 50));
 
@@ -661,7 +662,8 @@ namespace WzComparerR2.CharaSimControl
                 return BitmapOrigin.CreateFromNode(node, PluginBase.PluginManager.FindWz);
             }).ToArray();
 
-            Color color = Color.FromArgb(resNode.FindNodeByPath("clr").GetValueEx(-1));
+            uint argbColor = resNode.FindNodeByPath("clr").GetValueEx(uint.MaxValue);
+            Color color = Color.FromArgb((int)argbColor);
             BitmapOrigin ani0 = default;
             Wz_Node ani0Node = resNode.FindNodeByPath(false, "ani", "0");
             if (ani0Node != null)

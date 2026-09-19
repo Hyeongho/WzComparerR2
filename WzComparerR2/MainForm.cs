@@ -38,6 +38,7 @@ namespace WzComparerR2
         public MainForm()
         {
             InitializeComponent();
+            this.InitializeWzQueryControl();
 #if NET6_0_OR_GREATER
             // https://learn.microsoft.com/en-us/dotnet/core/compatibility/fx-core#controldefaultfont-changed-to-segoe-ui-9pt
             this.Font = new Font("굴림", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(129)));
@@ -52,6 +53,28 @@ namespace WzComparerR2
             initFields();
             loadUIState();
             GearGraphics.LoadFonts();
+        }
+
+        private void InitializeWzQueryControl()
+        {
+            var queryControl = new WzQueryControl(this.NavigateToWzQueryResult);
+            queryControl.Location = new Point(0, 35);
+            queryControl.Size = new Size(this.superTabControlPanel3.ClientSize.Width, Math.Max(0, this.superTabControlPanel3.ClientSize.Height - 35));
+            queryControl.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
+            this.superTabControlPanel3.Controls.Add(queryControl);
+        }
+
+        private void NavigateToWzQueryResult(string fullPath)
+        {
+            Wz_Node wzNode = PluginManager.FindWz(fullPath.Replace("Base.wz", "Base"));
+            if (wzNode == null)
+            {
+                MessageBoxEx.Show(this, "노드를 찾을 수 없습니다.");
+                return;
+            }
+
+            //this.superTabControl1.SelectedTab = this.superTabItem1;
+            this.RedirectToNode(wzNode);
         }
 
         List<Wz_Structure> openedWz;
@@ -1155,6 +1178,11 @@ namespace WzComparerR2
                 // save still picture as png
                 this.OnSavePngFile(frameData.Frames[0]);
             }
+            else if (aniItem.Count == 1 && 
+                aniItem[0] is ISpineAnimator && aniItem[0].Length <= 0)
+            {
+                this.OnSaveAnimationPngFile(aniItem[0], options);
+            }
             else
             {
                 // save as gif/apng
@@ -1239,6 +1267,42 @@ namespace WzComparerR2
 
         }
 
+        private void OnSaveAnimationPngFile(AnimationItem aniItem, bool options)
+        {
+            var config = ImageHandlerConfig.Default;
+            string aniName = this.cmbItemAniNames.SelectedItem as string;
+            string pngFileName = pictureBoxEx1.PictureName
+                + (string.IsNullOrEmpty(aniName) ? "" : ("." + aniName))
+                + ".png";
+
+            if (config.AutoSaveEnabled)
+            {
+                pngFileName = Path.Combine(config.AutoSavePictureFolder,
+                    string.Join("_", pngFileName.Split(Path.GetInvalidFileNameChars(), StringSplitOptions.None)));
+            }
+            else
+            {
+                var dlg = new SaveFileDialog();
+                dlg.Filter = "PNG (*.png)|*.png|모든 파일 (*.*)|*.*";
+                dlg.FileName = pngFileName;
+                if (dlg.ShowDialog() != DialogResult.OK)
+                {
+                    return;
+                }
+                pngFileName = dlg.FileName;
+            }
+
+            var clonedAniItem = (AnimationItem)aniItem.Clone();
+            if (this.pictureBoxEx1.SaveAsPng(clonedAniItem, pngFileName, config, options))
+            {
+                labelItemStatus.Text = "그림 저장 완료: " + pngFileName;
+            }
+            else
+            {
+                labelItemStatus.Text = "그림 저장 실패";
+            }
+        }
+        
         private void OnSaveGifFile(IEnumerable<AnimationItem> aniItem, IEnumerable<Tuple<int, int>> aniItemTime, bool options)
         {
             var config = ImageHandlerConfig.Default;
@@ -1315,6 +1379,7 @@ namespace WzComparerR2
 
             Wz_Structure wz = new Wz_Structure();
             QueryPerformance.Start();
+            ImgNameContainer.Load();
             DirNameContainer.Dirs.Clear();
             labelItemStatus.Text = $"로드 중: {wzFilePath}";
             advTree1.BeginUpdate();
@@ -1614,19 +1679,21 @@ namespace WzComparerR2
 
         private void UpdateStringLinker(Wz_Node baseNode, Wz_Node updateNode, bool doStopWatch = true)
         {
-            Wz_File stringWzFile = baseNode?.FindNodeByPath("String")?.GetNodeWzFile() ?? findStringWz();
-            Wz_File itemWzFile = baseNode?.FindNodeByPath("Item")?.GetNodeWzFile() ?? findItemWz();
-            Wz_File etcWzFile = baseNode?.FindNodeByPath("Etc")?.GetNodeWzFile() ?? findEtcWz();
-            Wz_File questWzFile = baseNode?.FindNodeByPath("Quest")?.GetNodeWzFile() ?? findQuestWz();
+            Wz_File stringWzFile = baseNode?.FindNodeByPath("String")?.GetNodeWzFile() ?? findWzByType(Wz_Type.String);
+            Wz_File itemWzFile = baseNode?.FindNodeByPath("Item")?.GetNodeWzFile() ?? findWzByType(Wz_Type.Item);
+            Wz_File etcWzFile = baseNode?.FindNodeByPath("Etc")?.GetNodeWzFile() ?? findWzByType(Wz_Type.Etc);
+            Wz_File questWzFile = baseNode?.FindNodeByPath("Quest")?.GetNodeWzFile() ?? findWzByType(Wz_Type.Quest);
+            Wz_File reactorWzFile = baseNode?.FindNodeByPath("Reactor")?.GetNodeWzFile() ?? findWzByType(Wz_Type.Reactor);
 
             Wz_Node stringNode = updateNode?.FindNodeByPath("String");
             Wz_Node itemNode = updateNode?.FindNodeByPath("Item");
             Wz_Node etcNode = updateNode?.FindNodeByPath("Etc");
             Wz_Node questNode = updateNode?.FindNodeByPath("Quest");
+            Wz_Node reactorNode = updateNode?.FindNodeByPath("Reactor");
 
             if (doStopWatch) QueryPerformance.Start();
             this.stringLinker.Clear();
-            bool r = this.stringLinker.Load(stringWzFile, itemWzFile, etcWzFile, questWzFile) && stringLinker.Update(stringNode, itemNode, etcNode, questNode);
+            bool r = this.stringLinker.Load(stringWzFile, itemWzFile, etcWzFile, questWzFile, reactorWzFile) && stringLinker.Update(stringNode, itemNode, etcNode, questNode, reactorNode);
             if (doStopWatch) QueryPerformance.End();
             if (r)
             {
@@ -2198,6 +2265,8 @@ namespace WzComparerR2
                 return false;
             }
 
+            bool insideImage = false;
+
             for (int i = 1; i < path.Length; i++)
             {
                 Node find = null;
@@ -2220,6 +2289,7 @@ namespace WzComparerR2
                     if (advTree2.Nodes.Count > 0)
                     {
                         treeNode = advTree2.Nodes[0];
+                        insideImage = true;
                     }
                     else
                     {
@@ -2232,7 +2302,14 @@ namespace WzComparerR2
                 }
             }
 
-            advTree2.SelectedNode = treeNode;
+            if (insideImage)
+            {
+                advTree2.SelectedNode = treeNode;
+            }
+            else
+            {
+                advTree1.SelectedNode = treeNode;
+            }
             return true;
         }
 
@@ -2382,11 +2459,9 @@ namespace WzComparerR2
                     addPath();
                     break;
 
-                case "AchievementData":
-                    wzPath.Add("Etc");
-                    wzPath.Add("Achievement");
-                    wzPath.Add("AchievementData");
-                    wzPath.Add($"{id}.img");
+                case "Reactor":
+                    wzPath.Add("Reactor");
+                    wzPath.Add($"{id.PadLeft(7, '0')}.img");
                     addPath();
                     break;
 
@@ -2913,6 +2988,7 @@ namespace WzComparerR2
                     dicts.Add(stringLinker.StringSkill);
                     dicts.Add(stringLinker.StringSetItem);
                     dicts.Add(stringLinker.StringAchievement);
+                    dicts.Add(stringLinker.StringReactor);
                     break;
                 case 1:
                     dicts.Add(stringLinker.StringEqp);
@@ -2940,6 +3016,9 @@ namespace WzComparerR2
                     break;
                 case 9:
                     dicts.Add(stringLinker.StringAchievement);
+                    break;
+                case 10:
+                    dicts.Add(stringLinker.StringReactor);
                     break;
             }
 
@@ -2970,7 +3049,7 @@ namespace WzComparerR2
             {
                 foreach (Wz_File file in wz.wz_files)
                 {
-                    if (file.Type == Wz_Type.String && this.stringLinker.Load(file, null, null, null))
+                    if (file.Type == Wz_Type.String && this.stringLinker.Load(file, null, null, null, null))
                     {
                         return true;
                     }
@@ -2979,58 +3058,13 @@ namespace WzComparerR2
             return false;
         }
 
-        private Wz_File findStringWz()
+        private Wz_File findWzByType(Wz_Type type)
         {
             foreach (Wz_Structure wz in openedWz)
             {
                 foreach (Wz_File file in wz.wz_files)
                 {
-                    if (file.Type == Wz_Type.String && file.Node.Nodes.Count > 0)
-                    {
-                        return file;
-                    }
-                }
-            }
-            return null;
-        }
-
-        private Wz_File findItemWz()
-        {
-            foreach (Wz_Structure wz in openedWz)
-            {
-                foreach (Wz_File file in wz.wz_files)
-                {
-                    if (file.Type == Wz_Type.Item && file.Node.Nodes.Count > 0)
-                    {
-                        return file;
-                    }
-                }
-            }
-            return null;
-        }
-
-        private Wz_File findEtcWz()
-        {
-            foreach (Wz_Structure wz in openedWz)
-            {
-                foreach (Wz_File file in wz.wz_files)
-                {
-                    if (file.Type == Wz_Type.Etc && file.Node.Nodes.Count > 0)
-                    {
-                        return file;
-                    }
-                }
-            }
-            return null;
-        }
-
-        private Wz_File findQuestWz()
-        {
-            foreach (Wz_Structure wz in openedWz)
-            {
-                foreach (Wz_File file in wz.wz_files)
-                {
-                    if (file.Type == Wz_Type.Quest && file.Node.Nodes.Count > 0)
+                    if (file.Type == type && file.Node.Nodes.Count > 0)
                     {
                         return file;
                     }
@@ -3755,6 +3789,13 @@ namespace WzComparerR2
                     obj = quest;
                     break;
 
+                case Wz_Type.Reactor:
+                    if ((image = selectedNode.GetValue<Wz_Image>()) == null || !image.TryExtract())
+                        return;
+                    var reactor = Reactor.CreateFromNode(image.Node, PluginManager.FindWz);
+                    obj = reactor;
+                    break;
+
                 case Wz_Type.Etc:
                     CharaSimLoader.LoadSetItemsIfEmpty();
                     Wz_Node setItemNode = selectedNode;
@@ -3787,26 +3828,9 @@ namespace WzComparerR2
                 StringBuilder npcQuoteSb = new StringBuilder();
 
                 // dispose bitmaps no longer in use
-                if (tooltipQuickView.TargetItem != null)
+                if (tooltipQuickView.TargetItem is IDisposable disposable)
                 {
-                    switch (tooltipQuickView.TargetItem)
-                    {
-                        case Mob item:
-                            item.Dispose();
-                            break;
-                        case Morph item:
-                            item.Dispose();
-                            break;
-                        case Npc item:
-                            item.Dispose();
-                            break;
-                        case Quest item:
-                            item.Dispose();
-                            break;
-                        case Familiar item:
-                            item.Dispose();
-                            break;
-                    }
+                    disposable.Dispose();
                 }
                 switch (obj)
                 {
@@ -4304,6 +4328,19 @@ namespace WzComparerR2
             get { return advTree3.SelectedNode.AsWzNode(); }
         }
 
+        bool PluginContextProvider.SelectNode(Wz_Node node)
+        {
+            if (node == null)
+            {
+                return false;
+            }
+            if (this.InvokeRequired)
+            {
+                return (bool)this.Invoke(new Func<Wz_Node, bool>(((PluginContextProvider)this).SelectNode), node);
+            }
+            return this.OnSelectedWzNode(node);
+        }
+
         private EventHandler<WzNodeEventArgs> selectedNode1Changed;
         private EventHandler<WzNodeEventArgs> selectedNode2Changed;
         private EventHandler<WzNodeEventArgs> selectedNode3Changed;
@@ -4348,6 +4385,19 @@ namespace WzComparerR2
         AlphaForm PluginContextProvider.DefaultTooltipWindow
         {
             get { return this.tooltipQuickView; }
+        }
+
+        eStyle PluginContextProvider.MainStyle
+        {
+            get { return this.styleManager1.ManagerStyle; }
+        }
+
+        private EventHandler mainStyleChanged;
+
+        event EventHandler PluginContextProvider.MainStyleChanged
+        {
+            add { mainStyleChanged += value; }
+            remove { mainStyleChanged -= value; }
         }
 
         private void RegisterPluginEvents()
