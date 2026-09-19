@@ -191,14 +191,26 @@ public static unsafe class WzExports
 	// nodePathUtf8: IMG 내부 Canvas 노드까지의 백슬래시 구분 경로
 	//               (예: "Face.img\00020000\face\0")
 	// outWidth/outHeight: 디코딩된 이미지 크기 (실패 시 0)
+	// outOriginX/outOriginY: 이 캔버스 노드의 형제 "origin" 프로퍼티(Wz_Vector,
+	//               없으면 0,0) — 타일/오브젝트/back 전부 발밑·기준점 정렬에
+	//               필요해서 추가. wz_read_avatar는 아바타 합성 결과 자체의
+	//               별도 원점(AvatarCanvas.DrawFrame이 계산)이라 이 값과는 무관.
+	// outDelayMs  : 이 캔버스 노드의 형제 "delay" 프로퍼티(ms, 없으면 120) —
+	//               AvatarCanvas.LoadActionFrameDesc와 동일한 "Nodes["delay"]
+	//               읽고 없으면 120" 패턴. 애니메이션이 아닌 단일 프레임
+	//               캔버스도 그냥 120이 채워지며, 호출자가 프레임이 1개뿐이면
+	//               무시하면 된다.
 	// outLen      : 반환 바이트 수 = width*height*4 (실패 시 0)
 	// 반환        : BGRA8888(메모리상 B,G,R,A 순서) 픽셀 바이트 포인터
 	//               (wz_free로 해제), 실패 시 IntPtr.Zero
 	[UnmanagedCallersOnly(EntryPoint = "wz_read_canvas")]
-	public static IntPtr WzReadCanvas(IntPtr wzPathUtf8, IntPtr nodePathUtf8, int* outWidth, int* outHeight, int* outLen)
+	public static IntPtr WzReadCanvas(IntPtr wzPathUtf8, IntPtr nodePathUtf8, int* outWidth, int* outHeight, int* outOriginX, int* outOriginY, int* outDelayMs, int* outLen)
 	{
 		*outWidth = 0;
 		*outHeight = 0;
+		*outOriginX = 0;
+		*outOriginY = 0;
+		*outDelayMs = 120;
 		*outLen = 0;
 		try
 		{
@@ -223,6 +235,14 @@ public static unsafe class WzExports
 
 			if (found?.Value is not Wz_Png png)
 				return IntPtr.Zero;
+
+			Wz_Vector? origin = found.Nodes["origin"].GetValueEx<Wz_Vector>(null);
+			if (origin != null)
+			{
+				*outOriginX = origin.X;
+				*outOriginY = origin.Y;
+			}
+			*outDelayMs = found.Nodes["delay"].GetValueEx<int>(120);
 
 			using Bitmap bmp = png.ExtractPng();
 			int width = bmp.Width;
@@ -559,6 +579,351 @@ public static unsafe class WzExports
 		}
 		catch
 		{
+			return IntPtr.Zero;
+		}
+	}
+
+	// ── Map.wz 구조 데이터 export ───────────────────────────────────────────
+	// 픽셀은 여기서 안 돌려준다 — 각 아이템의 필드로 캔버스 노드 경로를
+	// 계산해서(예: obj는 "Map\Obj\{oS}.img\{l0}\{l1}\{l2}\{frame}" — 이건
+	// WzComparerR2.MapRender/Patches2/ObjItem.cs:131에서 실제로 그렇게
+	// 만드는 걸 코드로 확인함) 기존 wz_read_canvas를 프레임 인덱스
+	// 0,1,2...로 반복 호출하면 된다(wz_read_avatar의 walk1 프레임 로딩과
+	// 동일 패턴). tile("Tile\{tS}.img\{u}\{no}")과 back
+	// ("Map\Back\{bS}.img\back|ani\{no}[\frame]", ani=0/1로 분기)은
+	// MapleStory WZ의 표준 관례이긴 하지만 이 저장소 코드에서 직접 확인한
+	// obj 경로만큼 확실친 않음 — 실제로 돌려서 안 맞으면 C++ 쪽 경로
+	// 조합 한 줄만 고치면 됨(구조 데이터 자체는 원본 WZ 필드 그대로라
+	// 안 바뀜).
+	//
+	// 문자열 필드(oS/tS/u/bS 등)는 고정 32바이트 UTF-8 버퍼 — 실제 WZ
+	// 식별자는 전부 훨씬 짧아서(예: "acc6","minar","nature2","bsc","enH1")
+	// 32면 충분하다고 보지만, 넘치면 WriteFixedUtf8이 자르고 항상
+	// null-terminate한다(버퍼 오버런 없음). 배열은 전부 wz_free로 해제.
+
+	[StructLayout(LayoutKind.Sequential, Pack = 4)]
+	public struct NativeMapInfo
+	{
+		public int VRLeft, VRTop, VRRight, VRBottom;
+	}
+
+	[StructLayout(LayoutKind.Sequential, Pack = 4)]
+	public unsafe struct NativeMapBackItem
+	{
+		public fixed byte Bs[32];
+		public int No;
+		public int Ani;   // 0=정적("back"), 1=애니메이션("ani", 프레임 반복 조회 필요)
+		public int Front; // 0=맵 레이어보다 뒤, 1=맵 레이어보다 앞
+		public int F;     // 좌우 반전
+		public int X, Y;
+		public int Rx, Ry; // 타일링 반복 간격(0이면 반복 없음)
+		public int Type;   // 0=없음,1=가로,2=세로,3=가로+세로 (+4~7은 스크롤 변형)
+		public int Cx, Cy; // 타일링 셀 크기
+		public int A;      // 알파(0~255)
+	}
+
+	[StructLayout(LayoutKind.Sequential, Pack = 4)]
+	public unsafe struct NativeMapTileItem
+	{
+		public fixed byte U[32]; // 타일 조각 이름(예: "bsc","enH1")
+		public int No;
+		public int X, Y;
+		public int Zm;
+	}
+
+	[StructLayout(LayoutKind.Sequential, Pack = 4)]
+	public unsafe struct NativeMapObjItem
+	{
+		public fixed byte Os[32];
+		public fixed byte L0[32];
+		public fixed byte L1[32];
+		public fixed byte L2[32];
+		public int X, Y, Z, Zm, F;
+	}
+
+	[StructLayout(LayoutKind.Sequential, Pack = 4)]
+	public struct NativeFootholdItem
+	{
+		// id/layer/group을 반드시 같이 보존한다 — prev/next는 "같은
+		// layer·group 안의 다른 id"를 가리키는 값이라 이것들이 없으면
+		// 의미가 없어진다(계층 정보 유실). 물리 연동은 이번 범위 밖 —
+		// 파싱 단계에서는 수직 선분도 거르지 않고 원본 그래프 그대로 둔다.
+		public int Id;
+		public int Layer;
+		public int Group;
+		public int X1, Y1, X2, Y2;
+		public int Prev, Next, Piece;
+	}
+
+	// dest를 항상 0으로 채운 뒤(=항상 null-terminated) value를 UTF-8로
+	// 최대 destSize-1바이트까지만 복사한다 — 넘치는 부분은 자르되 절대
+	// destSize를 벗어나 쓰지 않는다.
+	private static void WriteFixedUtf8(byte* dest, int destSize, string? value)
+	{
+		for (int i = 0; i < destSize; i++)
+			dest[i] = 0;
+
+		if (string.IsNullOrEmpty(value) || destSize <= 0)
+			return;
+
+		byte[] bytes = Encoding.UTF8.GetBytes(value);
+		int copyLen = Math.Min(bytes.Length, destSize - 1);
+		for (int i = 0; i < copyLen; i++)
+			dest[i] = bytes[i];
+	}
+
+	// items를 하나의 네이티브 배열로 묶어 할당(wz_free로 해제). 빈 배열이면
+	// outCount=0, IntPtr.Zero.
+	private static IntPtr AllocArray<T>(List<T> items, int* outCount) where T : unmanaged
+	{
+		*outCount = items.Count;
+		if (items.Count == 0)
+			return IntPtr.Zero;
+
+		int size = sizeof(T);
+		IntPtr ptr = Marshal.AllocCoTaskMem(size * items.Count);
+		for (int i = 0; i < items.Count; i++)
+		{
+			*(T*)(ptr + i * size) = items[i];
+		}
+		return ptr;
+	}
+
+	// wzPathUtf8/mapPathUtf8으로 맵 .img 노드를 연다. mapPathUtf8은 WZ 루트
+	// 기준 백슬래시 경로(예: "Map\Map\Map2\240020210.img"). extractImage:
+	// true 필수 — 안 그러면 back/foothold/레이어 전부 빈 노드로 돌아온다
+	// (아바타 로딩 때 zmap.img에서 이미 겪은 것과 같은 클래스의 문제).
+	private static Wz_Node? FindMapNode(IntPtr wzPathUtf8, IntPtr mapPathUtf8)
+	{
+		string wzPath = Marshal.PtrToStringUTF8(wzPathUtf8) ?? throw new ArgumentNullException("wzPath");
+		string mapPath = Marshal.PtrToStringUTF8(mapPathUtf8) ?? throw new ArgumentNullException("mapPath");
+
+		Wz_Node? root;
+		if (Directory.Exists(wzPath))
+		{
+			var structure = new Wz_Structure();
+			Wz_Node? rootNode = null;
+			structure.LoadWzFolder(wzPath, ref rootNode, false);
+			root = rootNode ?? structure.WzNode;
+		}
+		else
+		{
+			root = OpenWzPathAndGetRoot(wzPath);
+		}
+
+		return root?.FindNodeByPath(mapPath, true);
+	}
+
+	// ── wz_map_read_info ────────────────────────────────────────────────────
+	// outInfo: 호출자가 들고 있는 NativeMapInfo에 그대로 채워 넣는다(별도
+	// 힙 할당/해제 없음 — 단일 고정 크기 구조체라 배열 패턴을 안 씀).
+	// 반환: 성공하면 1, info 노드가 없거나 실패하면 0(outInfo는 0으로 채워짐).
+	[UnmanagedCallersOnly(EntryPoint = "wz_map_read_info")]
+	public static int WzMapReadInfo(IntPtr wzPathUtf8, IntPtr mapPathUtf8, NativeMapInfo* outInfo)
+	{
+		*outInfo = default;
+		try
+		{
+			Wz_Node? infoNode = FindMapNode(wzPathUtf8, mapPathUtf8)?.Nodes["info"];
+			if (infoNode == null)
+				return 0;
+
+			outInfo->VRLeft = infoNode.Nodes["VRLeft"].GetValueEx(0);
+			outInfo->VRTop = infoNode.Nodes["VRTop"].GetValueEx(0);
+			outInfo->VRRight = infoNode.Nodes["VRRight"].GetValueEx(0);
+			outInfo->VRBottom = infoNode.Nodes["VRBottom"].GetValueEx(0);
+			return 1;
+		}
+		catch
+		{
+			return 0;
+		}
+	}
+
+	// ── wz_map_read_back ────────────────────────────────────────────────────
+	// outCount: 아이템 개수(실패/없음 시 0)
+	// 반환: NativeMapBackItem 배열(wz_free로 해제), 실패 시 IntPtr.Zero
+	[UnmanagedCallersOnly(EntryPoint = "wz_map_read_back")]
+	public static IntPtr WzMapReadBack(IntPtr wzPathUtf8, IntPtr mapPathUtf8, int* outCount)
+	{
+		*outCount = 0;
+		try
+		{
+			Wz_Node? backNode = FindMapNode(wzPathUtf8, mapPathUtf8)?.Nodes["back"];
+			if (backNode == null)
+				return IntPtr.Zero;
+
+			var items = new List<NativeMapBackItem>();
+			foreach (Wz_Node node in backNode.Nodes)
+			{
+				NativeMapBackItem item = default;
+				WriteFixedUtf8(item.Bs, 32, node.Nodes["bS"].GetValueEx<string>(null));
+				item.No = node.Nodes["no"].GetValueEx(0);
+				item.Ani = node.Nodes["ani"].GetValueEx(0);
+				item.Front = node.Nodes["front"].GetValueEx(0);
+				item.F = node.Nodes["f"].GetValueEx(0);
+				item.X = node.Nodes["x"].GetValueEx(0);
+				item.Y = node.Nodes["y"].GetValueEx(0);
+				item.Rx = node.Nodes["rx"].GetValueEx(0);
+				item.Ry = node.Nodes["ry"].GetValueEx(0);
+				item.Type = node.Nodes["type"].GetValueEx(0);
+				item.Cx = node.Nodes["cx"].GetValueEx(0);
+				item.Cy = node.Nodes["cy"].GetValueEx(0);
+				item.A = node.Nodes["a"].GetValueEx(255);
+				items.Add(item);
+			}
+
+			return AllocArray(items, outCount);
+		}
+		catch
+		{
+			*outCount = 0;
+			return IntPtr.Zero;
+		}
+	}
+
+	// ── wz_map_read_layer ───────────────────────────────────────────────────
+	// layerIndex: 0~7 (맵 .img 바로 아래 숫자 키 노드)
+	// outTs/tsBufferSize: 레이어의 info\tS(타일셋 이름) — 고정 버퍼, 호출자가
+	//                     할당해서 넘김(배열이 아니라 이것도 별도 힙 없음)
+	// outTsMag  : info\tSMag(없으면 1)
+	// outTiles/outTileCount, outObjs/outObjCount: 각각 wz_free로 해제
+	// 반환: 레이어 노드 자체가 없으면 0, 있으면(내용이 비어 있어도) 1
+	[UnmanagedCallersOnly(EntryPoint = "wz_map_read_layer")]
+	public static int WzMapReadLayer(
+		IntPtr wzPathUtf8, IntPtr mapPathUtf8, int layerIndex,
+		byte* outTs, int tsBufferSize, int* outTsMag,
+		IntPtr* outTiles, int* outTileCount,
+		IntPtr* outObjs, int* outObjCount)
+	{
+		if (outTs != null)
+		{
+			WriteFixedUtf8(outTs, tsBufferSize, null);
+		}
+		*outTsMag = 1;
+		*outTiles = IntPtr.Zero;
+		*outTileCount = 0;
+		*outObjs = IntPtr.Zero;
+		*outObjCount = 0;
+
+		try
+		{
+			Wz_Node? mapNode = FindMapNode(wzPathUtf8, mapPathUtf8);
+			Wz_Node? layerNode = mapNode?.Nodes[layerIndex.ToString()];
+			if (layerNode == null)
+				return 0;
+
+			Wz_Node? infoNode = layerNode.Nodes["info"];
+			string? tS = infoNode?.Nodes["tS"].GetValueEx<string>(null);
+			if (outTs != null)
+			{
+				WriteFixedUtf8(outTs, tsBufferSize, tS);
+			}
+			*outTsMag = infoNode?.Nodes["tSMag"].GetValueEx(1) ?? 1;
+
+			Wz_Node? tileNode = layerNode.Nodes["tile"];
+			if (tS != null && tileNode != null)
+			{
+				var tiles = new List<NativeMapTileItem>();
+				foreach (Wz_Node node in tileNode.Nodes)
+				{
+					NativeMapTileItem item = default;
+					WriteFixedUtf8(item.U, 32, node.Nodes["u"].GetValueEx<string>(null));
+					item.No = node.Nodes["no"].GetValueEx(0);
+					item.X = node.Nodes["x"].GetValueEx(0);
+					item.Y = node.Nodes["y"].GetValueEx(0);
+					item.Zm = node.Nodes["zM"].GetValueEx(0);
+					tiles.Add(item);
+				}
+				*outTiles = AllocArray(tiles, outTileCount);
+			}
+
+			Wz_Node? objNode = layerNode.Nodes["obj"];
+			if (objNode != null)
+			{
+				var objs = new List<NativeMapObjItem>();
+				foreach (Wz_Node node in objNode.Nodes)
+				{
+					NativeMapObjItem item = default;
+					WriteFixedUtf8(item.Os, 32, node.Nodes["oS"].GetValueEx<string>(null));
+					WriteFixedUtf8(item.L0, 32, node.Nodes["l0"].GetValueEx<string>(null));
+					WriteFixedUtf8(item.L1, 32, node.Nodes["l1"].GetValueEx<string>(null));
+					WriteFixedUtf8(item.L2, 32, node.Nodes["l2"].GetValueEx<string>(null));
+					item.X = node.Nodes["x"].GetValueEx(0);
+					item.Y = node.Nodes["y"].GetValueEx(0);
+					item.Z = node.Nodes["z"].GetValueEx(0);
+					item.Zm = node.Nodes["zM"].GetValueEx(0);
+					item.F = node.Nodes["f"].GetValueEx(0);
+					objs.Add(item);
+				}
+				*outObjs = AllocArray(objs, outObjCount);
+			}
+
+			return 1;
+		}
+		catch
+		{
+			*outTiles = IntPtr.Zero;
+			*outTileCount = 0;
+			*outObjs = IntPtr.Zero;
+			*outObjCount = 0;
+			return 0;
+		}
+	}
+
+	// ── wz_map_read_footholds ───────────────────────────────────────────────
+	// 맵 .img\foothold\{layer 0~7}\{group}\{id} 전체를 평탄화한 배열로
+	// 돌려준다. 수직 선분도 포함(파싱 단계에서는 안 거름).
+	// outCount: 아이템 개수(실패/없음 시 0)
+	// 반환: NativeFootholdItem 배열(wz_free로 해제), 실패 시 IntPtr.Zero
+	[UnmanagedCallersOnly(EntryPoint = "wz_map_read_footholds")]
+	public static IntPtr WzMapReadFootholds(IntPtr wzPathUtf8, IntPtr mapPathUtf8, int* outCount)
+	{
+		*outCount = 0;
+		try
+		{
+			Wz_Node? fhRoot = FindMapNode(wzPathUtf8, mapPathUtf8)?.Nodes["foothold"];
+			if (fhRoot == null)
+				return IntPtr.Zero;
+
+			var items = new List<NativeFootholdItem>();
+			for (int layer = 0; layer <= 7; layer++)
+			{
+				Wz_Node? layerNode = fhRoot.Nodes[layer.ToString()];
+				if (layerNode == null)
+					continue;
+
+				foreach (Wz_Node groupNode in layerNode.Nodes)
+				{
+					if (!int.TryParse(groupNode.Text, out int groupId))
+						continue;
+
+					foreach (Wz_Node idNode in groupNode.Nodes)
+					{
+						if (!int.TryParse(idNode.Text, out int fhId))
+							continue;
+
+						NativeFootholdItem item = default;
+						item.Id = fhId;
+						item.Layer = layer;
+						item.Group = groupId;
+						item.X1 = idNode.Nodes["x1"].GetValueEx(0);
+						item.Y1 = idNode.Nodes["y1"].GetValueEx(0);
+						item.X2 = idNode.Nodes["x2"].GetValueEx(0);
+						item.Y2 = idNode.Nodes["y2"].GetValueEx(0);
+						item.Prev = idNode.Nodes["prev"].GetValueEx(0);
+						item.Next = idNode.Nodes["next"].GetValueEx(0);
+						item.Piece = idNode.Nodes["piece"].GetValueEx(0);
+						items.Add(item);
+					}
+				}
+			}
+
+			return AllocArray(items, outCount);
+		}
+		catch
+		{
+			*outCount = 0;
 			return IntPtr.Zero;
 		}
 	}
