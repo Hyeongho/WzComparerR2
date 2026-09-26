@@ -93,7 +93,17 @@ internal static class MapAnimationLoader
 			return null;
 		}
 
-		repeat = aniNode.Nodes["repeat"].GetValueEx(0) != 0;
+		// 레퍼런스(ResourceLoader.cs:392)는 `node.Nodes["repeat"].GetValueEx<bool>()`
+		// (인자 없는 nullable 오버로드)로 읽어서 `Data.Repeat ?? true`로 소비한다 —
+		// 즉 "repeat" 프로퍼티 자체가 없으면 기본값은 "반복(loop)"이고, 명시적으로
+		// repeat=0인 경우에만 "한 번 재생하고 마지막 프레임에서 정지"가 된다.
+		// 예전 코드는 `GetValueEx(0)`(기본값 있는 오버로드)를 써서 프로퍼티가 없을
+		// 때 0(=정지)으로 기본값이 뒤집혀 있었다 — PickFrame이 repeat을 아예 안 보던
+		// 동안은 죽은 코드라 드러나지 않았지만, PickFrame이 repeat을 보게 고친 지금은
+		// 이 기본값이 반대로 되어 있으면 "repeat 프로퍼티가 없는" 흔한 케이스까지
+		// 전부 한 번만 재생하고 멈추는 쪽으로 뒤집혀 버린다.
+		int? repeatValue = aniNode.Nodes["repeat"].GetValueEx<int>();
+		repeat = repeatValue.HasValue ? repeatValue.Value != 0 : true;
 
 		var frames = new List<Wz_Node>();
 		Wz_Node? first = aniNode.Nodes["0"];
