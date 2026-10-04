@@ -41,6 +41,9 @@ namespace WzDll
                                            const char* nodePath,
                                            int*        outWidth,
                                            int*        outHeight,
+                                           int*        outOriginX,
+                                           int*        outOriginY,
+                                           int*        outDelayMs,
                                            int*        outLen);
     // wz_free: 위 함수들이 반환한 포인터 해제
     using FnFree    = void(*)(const char* ptr);
@@ -252,7 +255,8 @@ static bool extractCanvasToBmp(const std::string& wzPath,
     }
 
     int width = 0, height = 0, len = 0;
-    const uint8_t* pixels = WzDll::readCanvas(wzPath.c_str(), nodePath.c_str(), &width, &height, &len);
+    int originX = 0, originY = 0, delayMs = 120;
+    const uint8_t* pixels = WzDll::readCanvas(wzPath.c_str(), nodePath.c_str(), &width, &height, &originX, &originY, &delayMs, &len);
     if (!pixels || len == 0)
     {
         std::cerr << "[Canvas] 실패 — Canvas 노드를 찾을 수 없거나 디코딩 오류\n";

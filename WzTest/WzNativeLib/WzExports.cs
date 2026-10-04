@@ -671,14 +671,43 @@ public static unsafe class WzExports
 	// 기준 백슬래시 경로(예: "Map\Map\Map2\240020210.img"). extractImage:
 	// true 필수 — 안 그러면 back/foothold/레이어 전부 빈 노드로 돌아온다
 	// (아바타 로딩 때 zmap.img에서 이미 겪은 것과 같은 클래스의 문제).
-	private static Wz_Node? FindMapNode(IntPtr wzPathUtf8, IntPtr mapPathUtf8)
+	private static Wz_Node? FindMapNode(IntPtr wzPathUtf8, IntPtr mapPathUtf8, bool resolveLink = true)
 	{
 		string wzPath = Marshal.PtrToStringUTF8(wzPathUtf8) ?? throw new ArgumentNullException("wzPath");
 		string mapPath = Marshal.PtrToStringUTF8(mapPathUtf8) ?? throw new ArgumentNullException("mapPath");
 
 		Wz_Node? root = GetRoot(wzPath);
 
-		return root?.FindNodeByPath(mapPath, true);
+		Wz_Node? mapNode = ExtractMapNode(root?.FindNodeByPath(mapPath.Replace('/', '\\'), true));
+		if (!resolveLink || mapNode == null)
+		{
+			return mapNode;
+		}
+
+		// MapData.Load와 동일하게 기본 정보는 요청한 맵에서 읽고,
+		// 배경·레이어·발판·포털·리액터 배치는 info/link의 대상 맵에서 읽는다.
+		// 원본처럼 링크를 한 번만 해석하므로 순환 링크도 반복 탐색하지 않는다.
+		int? link = mapNode.Nodes["info"]?.Nodes["link"].GetValueEx<int>();
+		if (!link.HasValue)
+		{
+			return mapNode;
+		}
+		if (link.Value < 0)
+		{
+			return null;
+		}
+
+		string linkedPath = $@"Map\Map\Map{link.Value / 100000000}\{link.Value:D9}.img";
+		return ExtractMapNode(root?.FindNodeByPath(linkedPath, true));
+	}
+
+	private static Wz_Node? ExtractMapNode(Wz_Node? node)
+	{
+		if (node?.Value is Wz_Image image)
+		{
+			return image.TryExtract() ? image.Node : null;
+		}
+		return node;
 	}
 
 	// ── wz_map_read_info ────────────────────────────────────────────────────
@@ -691,7 +720,7 @@ public static unsafe class WzExports
 		*outInfo = default;
 		try
 		{
-			Wz_Node? infoNode = FindMapNode(wzPathUtf8, mapPathUtf8)?.Nodes["info"];
+			Wz_Node? infoNode = FindMapNode(wzPathUtf8, mapPathUtf8, resolveLink: false)?.Nodes["info"];
 			if (infoNode == null)
 				return 0;
 

@@ -72,11 +72,14 @@ internal static class MapAnimationLoader
 	public static List<Wz_Node>? EnumerateFrames(Wz_Node? aniNode, out bool isSpine, out bool repeat)
 	{
 		isSpine = false;
-		repeat = false;
+		repeat = true;
 
 		aniNode = aniNode?.ResolveUol();
 		if (aniNode == null)
 			return null;
+
+		// RepeatableFrameAnimator는 repeat가 없으면 반복하고, 명시적인 0만 정지한다.
+		repeat = aniNode.Nodes["repeat"].GetValueEx(1) != 0;
 
 		// 단일 캔버스 — 프레임 하나짜리 애니메이션으로 취급한다.
 		if (aniNode.Value is Wz_Png)
@@ -92,8 +95,6 @@ internal static class MapAnimationLoader
 			isSpine = true;
 			return null;
 		}
-
-		repeat = aniNode.Nodes["repeat"].GetValueEx(0) != 0;
 
 		var frames = new List<Wz_Node>();
 		Wz_Node? first = aniNode.Nodes["0"];
@@ -230,7 +231,7 @@ internal static class MapAnimationLoader
 		meta.Repeat = repeat ? 1 : 0;
 
 		// flowX/flowY는 맵 노드가 아니라 애니메이션 노드에 붙어 있다
-		// (MapData.cs:760-780). 스크롤 back에서만 쓰인다.
+		// (MapData.cs:760-780). 일반 프레임 배경에도 적용되며 spine 전용이 아니다.
 		Wz_Node? resolved = aniNode?.ResolveUol();
 		int? flowX = resolved?.Nodes["flowX"].GetValueEx<int>();
 		int? flowY = resolved?.Nodes["flowY"].GetValueEx<int>();
