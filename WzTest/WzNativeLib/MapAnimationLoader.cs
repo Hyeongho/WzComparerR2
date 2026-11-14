@@ -90,7 +90,8 @@ internal static class MapAnimationLoader
 		// spine 판별: 레퍼런스는 SpineLoader.Detect를 쓰지만 그건 spine-monogame에
 		// 의존한다. 여기서는 spine 데이터가 갖는 특징 노드만 확인해서 "우리가 못
 		// 그리는 것"으로만 분류하면 충분하다(그리지 않고 건너뛰는 게 전부라서).
-		if (aniNode.Nodes["skeleton"] != null || aniNode.Nodes["atlas"] != null)
+		if (aniNode.Nodes["skeleton"] != null || aniNode.Nodes["atlas"] != null
+			|| aniNode.Nodes["spine"] != null || NativeSpineScene.Detect(aniNode).Success)
 		{
 			isSpine = true;
 			return null;

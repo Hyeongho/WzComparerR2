@@ -23,7 +23,7 @@ using WzComparerR2.CharaSim;
 
 namespace WzNativeLib;
 
-public static unsafe class WzExports
+public static unsafe partial class WzExports
 {
 	// ── wz_open ─────────────────────────────────────────────────────────────
 	// MainForm.openWz() 동일 로직 — 파일 포맷을 자동 감지해서 로드
@@ -633,6 +633,18 @@ public static unsafe class WzExports
 		public int Prev, Next, Piece;
 	}
 
+	[StructLayout(LayoutKind.Sequential, Pack = 4)]
+	public struct NativeLadderRopeItem
+	{
+		// C++의 FMapLadderRopeItem과 필드 순서·크기를 동일하게 유지한다.
+		public int Index;
+		public int X, Y1, Y2;
+		public int L; // 0은 로프, 1은 사다리
+		public int Uf;
+		public int Page;
+		public int Piece;
+	}
+
 	// dest를 항상 0으로 채운 뒤(=항상 null-terminated) value를 UTF-8로
 	// 최대 destSize-1바이트까지만 복사한다 — 넘치는 부분은 자르되 절대
 	// destSize를 벗어나 쓰지 않는다.
@@ -921,6 +933,48 @@ public static unsafe class WzExports
 						items.Add(item);
 					}
 				}
+			}
+
+			return AllocArray(items, outCount);
+		}
+		catch
+		{
+			*outCount = 0;
+			return IntPtr.Zero;
+		}
+	}
+
+	// 맵의 ladderRope 배치를 원본 값 그대로 반환한다. 배열은 wz_free로 해제한다.
+	// 기존 배치 API와 동일하게 info/link 대상 맵에서 읽는다.
+	[UnmanagedCallersOnly(EntryPoint = "wz_map_read_ladder_ropes")]
+	public static IntPtr WzMapReadLadderRopes(IntPtr wzPathUtf8, IntPtr mapPathUtf8, int* outCount)
+	{
+		if (outCount == null)
+			return IntPtr.Zero;
+
+		*outCount = 0;
+		try
+		{
+			Wz_Node? ladderRopeRoot = FindMapNode(wzPathUtf8, mapPathUtf8)?.Nodes["ladderRope"];
+			if (ladderRopeRoot == null)
+				return IntPtr.Zero;
+
+			var items = new List<NativeLadderRopeItem>();
+			foreach (Wz_Node node in ladderRopeRoot.Nodes)
+			{
+				if (!int.TryParse(node.Text, out int index))
+					continue;
+
+				NativeLadderRopeItem item = default;
+				item.Index = index;
+				item.X = node.Nodes["x"].GetValueEx(0);
+				item.Y1 = node.Nodes["y1"].GetValueEx(0);
+				item.Y2 = node.Nodes["y2"].GetValueEx(0);
+				item.L = node.Nodes["l"].GetValueEx(0);
+				item.Uf = node.Nodes["uf"].GetValueEx(0);
+				item.Page = node.Nodes["page"].GetValueEx(0);
+				item.Piece = node.Nodes["piece"].GetValueEx(0);
+				items.Add(item);
 			}
 
 			return AllocArray(items, outCount);
