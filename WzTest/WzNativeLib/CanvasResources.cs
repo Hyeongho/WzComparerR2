@@ -5,11 +5,11 @@ namespace WzNativeLib;
 
 public static unsafe partial class WzExports
 {
-    // 1은 기존 직접 PNG 방식, 2는 UOL 및 Canvas 이미지 링크를 지원한다.
+    // 1은 직접 PNG, 2는 이미지 링크, 3은 이름이 역슬래시인 Canvas 경로도 지원한다.
     [UnmanagedCallersOnly(EntryPoint = "wz_canvas_api_version")]
     public static int WzCanvasApiVersion()
     {
-        return 2;
+        return 3;
     }
 
     // UI Canvas는 1x1 참조 PNG인 경우가 있다. 픽셀과 배치 메타데이터의 원본을 구분한다.
@@ -18,6 +18,13 @@ public static unsafe partial class WzExports
         if (root == null || string.IsNullOrEmpty(path))
         {
             return null;
+        }
+        // StatusBar의 숫자 구분자는 노드 이름 자체가 "\\"이다.
+        // 정규화 전에 마지막 구분자 + 실제 이름을 보존한다. _outlink에도 같은 규칙을 적용한다.
+        if (path.EndsWith("/\\", StringComparison.Ordinal) || path.EndsWith("\\\\", StringComparison.Ordinal))
+        {
+            Wz_Node? parent = FindCanvasNode(root, path.Substring(0, path.Length - 2));
+            return parent?.Nodes["\\"];
         }
         string normalized = path.Replace('/', '\\').Trim('\\');
         Wz_Node? node = root.FindNodeByPath(normalized, true);
@@ -66,7 +73,7 @@ public static unsafe partial class WzExports
             else if (!string.IsNullOrEmpty(inlink))
             {
                 Wz_Image? image = node.GetNodeWzImage();
-                node = image?.Node.FindNodeByPath(inlink.Replace('/', '\\'), true);
+                node = FindCanvasNode(image?.Node, inlink);
             }
             else if (!string.IsNullOrEmpty(outlink))
             {

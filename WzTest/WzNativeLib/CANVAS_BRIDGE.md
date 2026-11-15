@@ -1,10 +1,11 @@
 # 링크된 UI Canvas 추출
 
-`wz_read_canvas`의 기존 8개 인자와 BGRA8888 반환 규약은 유지한다. `CanvasResources.cs`에 경로·UOL·이미지 링크 해석을 추가하고 `wz_canvas_api_version` export가 2를 반환하도록 했다. C++ UI 로더는 구 DLL을 감지해 잘못된 1x1 UI 표시 대신 단색 HUD를 유지한다.
+`wz_read_canvas`의 기존 8개 인자와 BGRA8888 반환 규약은 유지한다. `CanvasResources.cs`에 경로·UOL·이미지 링크 해석을 추가했다. 현재 `wz_canvas_api_version`은 3이며, 2부터 링크된 Canvas를 지원하고 3부터 역슬래시 이름의 Canvas도 지원한다. C++ UI 이미지 로더는 2 이상, StatusBar3 이미지 숫자는 3 이상을 사용한다.
 
 ## 해석 규칙
 
 - 경로의 `/`를 `\`로 정규화하고 IMG를 추출한다. `UI\...` 경로는 Base.wz 통합 루트와 UI.wz 자체의 루트를 지원한다.
+- 마지막 `/\` 또는 `\\`는 경로 구분자 뒤의 실제 역슬래시 노드 이름으로 처리한다. 예를 들어 `UI/StatusBar3.img/mainBar/status/gauge/number/\`는 `number`의 이름이 `\`인 자식을 읽는다. 정규화 전에 이 이름을 보존하며 `_inlink`와 `_outlink`도 같은 해석을 사용한다.
 - UOL은 최대 32단계까지 해석한다. 상대 링크는 기존 Wz_Uol.HandleUol, 절대 링크는 WZ 루트에서 찾는다.
 - UOL 해석 후의 원본 Canvas에서 origin과 delay를 읽는다.
 - 픽셀은 source → _inlink → _outlink 우선순위로 찾는다. 링크 대상의 UOL·추가 이미지 링크도 해석하며 링크 체인은 최대 32단계다.
@@ -12,6 +13,8 @@
 - 성공 시 실제 이미지의 width/height와 원본 origin/delay를 반환한다. 네이티브 버퍼는 wz_free로 해제한다. 실패 시 출력 크기·길이는 0으로 초기화하며 이미 할당한 버퍼도 해제한다.
 
 사용자가 제공한 UI.StatusBar3.img.xml의 주요 PNG는 1x1이고 `_outlink`로 UI/_Canvas/StatusBar3.img의 실제 이미지를 참조한다. XML만으로 실제 그림을 복원하지 않으며, 실행 시 WZ에 대상 리소스가 있어야 한다. StatusBar3 전체 화면이나 버튼 동작을 DLL에서 만들지는 않는다.
+
+이미지 글꼴의 문자 매핑·정렬·배율·출력은 C++의 UImageFont/UTextBlock이 담당한다. DLL은 문자 이미지만 반환한다. API 3 DLL을 배포하기 전에도 API 2의 기존 WZ 게이지는 출력하며, C++ HUD는 이미지 숫자 대신 Windows 글꼴로 표시한다. 이번 작업에서는 새 export나 구조체 ABI를 추가하지 않았다.
 
 ## 게시
 
