@@ -195,12 +195,17 @@ public static unsafe partial class WzExports
 	[UnmanagedCallersOnly(EntryPoint = "wz_read_canvas")]
 	public static IntPtr WzReadCanvas(IntPtr wzPathUtf8, IntPtr nodePathUtf8, int* outWidth, int* outHeight, int* outOriginX, int* outOriginY, int* outDelayMs, int* outLen)
 	{
+		if (outWidth == null || outHeight == null || outOriginX == null || outOriginY == null || outDelayMs == null || outLen == null)
+		{
+			return IntPtr.Zero;
+		}
 		*outWidth = 0;
 		*outHeight = 0;
 		*outOriginX = 0;
 		*outOriginY = 0;
 		*outDelayMs = 120;
 		*outLen = 0;
+		IntPtr result = IntPtr.Zero;
 		try
 		{
 			string wzPath = Marshal.PtrToStringUTF8(wzPathUtf8) ?? throw new ArgumentNullException("wzPath");
@@ -208,10 +213,11 @@ public static unsafe partial class WzExports
 
 			Wz_Node? root = GetRoot(wzPath);
 
-			// extractImage: true — IMG 내부까지 자동으로 파고들며 프로퍼티를 추출한다.
-			Wz_Node? found = root?.FindNodeByPath(nodePath, true);
+			// UOL은 먼저 해석하고 origin/delay는 그 원본에서 읽는다.
+			Wz_Node? found = ResolveCanvasUol(root, FindCanvasNode(root, nodePath));
+			Wz_Png? png = ResolveCanvasPixels(root, found);
 
-			if (found?.Value is not Wz_Png png)
+			if (found == null || png == null)
 				return IntPtr.Zero;
 
 			Wz_Vector? origin = found.Nodes["origin"].GetValueEx<Wz_Vector>(null);
@@ -229,22 +235,22 @@ public static unsafe partial class WzExports
 			BitmapData data = bmp.LockBits(rect, ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
 			try
 			{
-				int rowBytes = width * 4;
-				int totalBytes = rowBytes * height;
-				IntPtr ptr = Marshal.AllocCoTaskMem(totalBytes);
+				int rowBytes = checked(width * 4);
+				int totalBytes = checked(rowBytes * height);
+				result = Marshal.AllocCoTaskMem(totalBytes);
 
 				// Stride가 rowBytes와 다를 수 있으므로(정렬 패딩) 줄 단위로 복사한다.
 				for (int y = 0; y < height; y++)
 				{
 					IntPtr srcRow = IntPtr.Add(data.Scan0, y * data.Stride);
-					IntPtr dstRow = IntPtr.Add(ptr, y * rowBytes);
+					IntPtr dstRow = IntPtr.Add(result, y * rowBytes);
 					Buffer.MemoryCopy((void*)srcRow, (void*)dstRow, rowBytes, rowBytes);
 				}
 
 				*outWidth = width;
 				*outHeight = height;
 				*outLen = totalBytes;
-				return ptr;
+				return result;
 			}
 			finally
 			{
@@ -253,6 +259,16 @@ public static unsafe partial class WzExports
 		}
 		catch
 		{
+			if (result != IntPtr.Zero)
+			{
+				Marshal.FreeCoTaskMem(result);
+			}
+			*outWidth = 0;
+			*outHeight = 0;
+			*outOriginX = 0;
+			*outOriginY = 0;
+			*outDelayMs = 120;
+			*outLen = 0;
 			return IntPtr.Zero;
 		}
 	}
