@@ -6,6 +6,7 @@ using System.Text.RegularExpressions;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using WzComparerR2.WzLib;
+using WzComparerR2.MapRender.Particles;
 using WzComparerR2.Common;
 using WzComparerR2.MapRender.Effects;
 using WzComparerR2.MapRender.Patches2;
@@ -84,11 +85,33 @@ namespace WzComparerR2.MapRender
                 }
             }
         }
+        public bool EnableMobDownJump
+        {
+            get { return enableMobDownJump; }
+            set
+            {
+                if (enableMobDownJump == value)
+                {
+                    return;
+                }
+
+                enableMobDownJump = value;
+                foreach (var life in this.Scene.Mobs)
+                {
+                    if (life.Controller != null)
+                    {
+                        life.Controller.DownJumpEnabled = value;
+                    }
+                }
+            }
+        }
         public Action<string> SoundEffPlayer;
         public Action<SceneItem> LoadSceneItemResource;
+        public Action<string> ParticleLoadLogger;
 
         private readonly IRandom random;
         private bool enableMobMovement;
+        private bool enableMobDownJump = false;
         private List<Tuple<SceneItem, int, int>> moveLayerQueue = new();
         private List<Tuple<SceneItem, int>> addToLayerQueue = new();
         private List<SceneItem> removeFromLayerQueue = new();
@@ -382,7 +405,7 @@ namespace WzComparerR2.MapRender
                 }
 
                 // init controller
-                item.Controller = new BehaviorController(item, FootholdManager, movementEnabled: this.EnableMobMovement);
+                item.Controller = new BehaviorController(item, FootholdManager, movementEnabled: this.EnableMobMovement) { DownJumpEnabled = this.EnableMobDownJump };
                 item.Controller.InitRandom(this.random);
                 if (!hs.Add(item.Controller.ID)) item.Controller.PlayRegenSound = false; // 소리 테러 방지
             }
@@ -554,7 +577,11 @@ namespace WzComparerR2.MapRender
             {
                 var item = ParticleItem.LoadFromNode(particleNode);
                 item.Name = node.Text;
-                Scene.Effect.Slots.Add(item);
+                foreach (var placement in item.SubItems)
+                {
+                    var placedItem = item.ForPlacement(placement);
+                    placedItem.GetRenderContainer(this.Scene).Slots.Add(placedItem);
+                }
             }
         }
 
@@ -774,8 +801,8 @@ namespace WzComparerR2.MapRender
             back.View = new BackItem.ItemView()
             {
                 Animator = animator,
-                FlowX = aniNode?.Nodes["flowX"]?.GetValueEx(0),
-                FlowY = aniNode?.Nodes["flowY"]?.GetValueEx(0),
+                FlowX = back.FlowX,
+                FlowY = back.FlowY,
                 Bounds = bounds,
             };
         }
@@ -1050,42 +1077,137 @@ namespace WzComparerR2.MapRender
 
         private void PreloadResource(ResourceLoader resLoader, ParticleItem particle)
         {
-            string path = $@"Effect\particle.img\{particle.ParticleName}";
-            var particleNode = PluginManager.FindWz(path);
-
-            if (particleNode == null)
+            var pendingSystem = particle.View?.ParticleSystem;
+            particle.View = null;
+            string directory = particle.Path;
+            string fallback = $@"Effect\particle.img\{particle.ParticleName}";
+            string path = string.IsNullOrEmpty(directory) ? fallback : directory.Replace('/', '\\') + "\\" + particle.ParticleName;
+            try
             {
-                return;
-            }
+                pendingSystem?.Dispose();
+                pendingSystem = null;
+                var particleNode = PluginManager.FindWz(path);
+                if (particleNode == null && path != fallback)
+                {
+                    path = fallback;
+                    particleNode = PluginManager.FindWz(path);
+                }
 
-            var desc = resLoader.LoadParticleDesc(particleNode);
-            switch (desc)
-            {
-                case ParticleDesc desc0:
-                    {
-                        var pSystem = new ParticleSystem(this.random);
-                        pSystem.LoadDescription(desc0);
+                if (particleNode == null)
+                {
+                    return;
+                }
 
-                        for (int i = 0; i < particle.SubItems.Length; i++)
+                var desc = resLoader.LoadParticleDesc(particleNode);
+                if (desc is ParticleDesc1 || desc is ParticleDesc3)
+                {
+                    pendingSystem = new ParticleSystem(this.random);
+                    pendingSystem.LoadModularDescription(desc, resLoader.GraphicsDevice);
+                    particle.View = new ParticleItem.ItemView { ParticleSystem = pendingSystem };
+                    pendingSystem = null;
+                    return;
+                }
+                switch (desc)
+                {
+                    case ParticleDesc desc0:
                         {
-                            var subItem = particle.SubItems[i];
-                            if (subItem.Quest.Exists(quest => !resLoader.PatchVisibility.IsQuestVisible(quest.ID, quest.State)))
+                            pendingSystem = new ParticleSystem(this.random);
+                            pendingSystem.LoadDescription(desc0);
+
+                            for (int i = 0; i < particle.SubItems.Length; i++)
                             {
-                                continue;
+                                var subItem = particle.SubItems[i];
+                                if (subItem.Quest.Exists(quest => !resLoader.PatchVisibility.IsQuestVisible(quest.ID, quest.State)))
+                                {
+                                    continue;
+                                }
+                                var pGroup = pendingSystem.CreateGroup(i.ToString());
+                                pGroup.Position = new Vector2(subItem.X, subItem.Y);
+                                pGroup.Active();
+                                pendingSystem.Groups.Add(pGroup);
                             }
-                            var pGroup = pSystem.CreateGroup(i.ToString());
-                            pGroup.Position = new Vector2(subItem.X, subItem.Y);
-                            pGroup.Active();
-                            pSystem.Groups.Add(pGroup);
-                        }
 
-                        particle.View = new ParticleItem.ItemView()
-                        {
-                            ParticleSystem = pSystem
-                        };
-                    }
-                    break;
+                            particle.View = new ParticleItem.ItemView { ParticleSystem = pendingSystem };
+                            pendingSystem = null;
+                        }
+                        break;
+                }
             }
+            catch (Exception ex) when (IsRecoverableParticleLoadError(ex))
+            {
+                this.ReportParticleLoadError("파티클 로딩 실패", particle, path, ex);
+            }
+            finally
+            {
+                if (pendingSystem != null)
+                {
+                    try
+                    {
+                        pendingSystem.Dispose();
+                    }
+                    catch (Exception ex) when (IsRecoverableParticleLoadError(ex))
+                    {
+                        this.ReportParticleLoadError("파티클 리소스 해제 실패", particle, path, ex);
+                    }
+                }
+            }
+        }
+
+        internal void DisposeParticleResources()
+        {
+            var nodes = new Stack<SceneNode>();
+            nodes.Push(this.Scene);
+            while (nodes.Count > 0)
+            {
+                var node = nodes.Pop();
+                if (node is ContainerNode container)
+                {
+                    foreach (var particle in container.Slots.OfType<ParticleItem>())
+                    {
+                        particle.View?.ParticleSystem?.Dispose();
+                        particle.View = null;
+                    }
+                }
+                foreach (var child in node.Nodes)
+                {
+                    nodes.Push(child);
+                }
+            }
+        }
+
+        private void ReportParticleLoadError(string operation, ParticleItem particle, string path, Exception exception)
+        {
+            string message = $"{operation}: 파티클={particle.ParticleName}, 경로={path}, {exception.GetType().Name}: {exception.Message}";
+            System.Diagnostics.Trace.TraceWarning("{0}, requested directory={1}. {2}", message, particle.Path, exception);
+            try
+            {
+                this.ParticleLoadLogger?.Invoke(message);
+            }
+            catch (Exception ex) when (IsRecoverableParticleLoadError(ex))
+            {
+                System.Diagnostics.Trace.TraceWarning("Particle UI logging failed: {0}", ex);
+            }
+        }
+
+        private static bool IsRecoverableParticleLoadError(Exception exception)
+        {
+            for (var error = exception; error != null; error = error.InnerException)
+            {
+                if (error is OutOfMemoryException || error is StackOverflowException || error is AccessViolationException
+                    || error is OperationCanceledException || error is System.Threading.ThreadAbortException)
+                {
+                    return false;
+                }
+                switch (error.HResult)
+                {
+                    case unchecked((int)0x887A0005): // DXGI_ERROR_DEVICE_REMOVED
+                    case unchecked((int)0x887A0006): // DXGI_ERROR_DEVICE_HUNG
+                    case unchecked((int)0x887A0007): // DXGI_ERROR_DEVICE_RESET
+                    case unchecked((int)0x887A0020): // DXGI_ERROR_DRIVER_INTERNAL_ERROR
+                        return false;
+                }
+            }
+            return true;
         }
 
         private void PreloadResource(ResourceLoader resLoader, SkillItem skill)
@@ -1287,215 +1409,8 @@ namespace WzComparerR2.MapRender
 
         private void AddMobAI(LifeItem life)
         {
-            StateMachineAnimator ani = life.View.Animator as StateMachineAnimator;
-            BehaviorController bc = life.Controller;
-            if (ani == null || bc == null) return;
-
-            bc.SetAnimationList(ani.Data.States);
-
-            string Prefer(params string[] names)
-            {
-                foreach (var n in names)
-                    if (ani.Data.States.Contains(n)) return n;
-                return null;
-            }
-
-            bool SetAni(string name)
-            {
-                if (string.IsNullOrEmpty(name)) return false;
-                ani.SetAnimation(name);
-                return true;
-            }
-
-            bool SetIfDifferent(string name)
-            {
-                if (string.IsNullOrEmpty(name) || ani.GetCurrent() == name) return false;
-                ani.SetAnimation(name);
-                return true;
-            }
-
-            bool SetEffectIfDifferent(string name)
-            {
-                if (string.IsNullOrEmpty(name) || ani.GetCurrentEffect() == name) return false;
-                ani.SetEffectAnimation(name);
-                return true;
-            }
-
-            bc.MobHit += (o, e) =>
-            {
-                string aniName = Prefer("hit1", "hit");
-                if (aniName == null)
-                {
-                    bc.RecoverHit();
-                    return;
-                }
-                SetAni(aniName);
-                PlaySoundEff(bc.ID, "Damage");
-            };
-
-            bc.StateChanged += (o, e) =>
-            {
-                var bState = e.BState;
-                var hState = e.HState;
-                var vState = e.VState;
-                var pState = e.PState;
-                string aniName;
-                string defaultMoveAni = pState == BehaviorController.ProvokeState.Chase ? "chase" : "move";
-
-                switch (bState)
-                {
-                    case BehaviorController.BaseState.Idle: // goto check VState if Idle else return
-                        break;
-
-                    case BehaviorController.BaseState.Regen:
-                        aniName = Prefer("regen");
-                        if (aniName == null)
-                        {
-                            bc.EndRegen();
-                            return;
-                        }
-                        if (SetIfDifferent(aniName) && bc.PlayRegenSound)
-                            PlaySoundEff(bc.ID, "Regen");
-                        return;
-
-                    case BehaviorController.BaseState.Hit:
-                        aniName = Prefer("hit1", "hit");
-                        if (aniName == null)
-                        {
-                            bc.RecoverHit();
-                            return;
-                        }
-                        SetIfDifferent(aniName);
-                        return;
-
-                    case BehaviorController.BaseState.Died:
-                        aniName = Prefer("die1", "die");
-                        if (aniName == null)
-                        {
-                            TrySummonMob(bc);
-                            if (bc.NoRegen)
-                            {
-                                RequestRemoveFromLayer(bc.Owner);
-                                break;
-                            }
-                            bc.RecoverDied();
-                            return;
-                        }
-                        if (SetIfDifferent(aniName) && bc.PlayDieSound)
-                            PlaySoundEff(bc.ID, "Die");
-                        return;
-
-                    case BehaviorController.BaseState.Attack:
-                        aniName = Prefer(bc.SelectedAttack);
-                        if (aniName == null)
-                        {
-                            bc.EndAttack();
-                            return;
-                        }
-                        if (SetIfDifferent(aniName))
-                            PlaySoundEff(bc.ID, life.Controller.SelectedAttack.Replace("attack", "Attack").Replace("skill", "Skill"));
-                        SetEffectIfDifferent(aniName + "_effect");
-                        return;
-
-                    default:
-                        goto case BehaviorController.BaseState.Idle;
-                }
-
-                switch (vState)
-                {
-                    case BehaviorController.VerticalState.Fly:
-                        SetIfDifferent(Prefer("fly"));
-                        break;
-
-                    case BehaviorController.VerticalState.Jump:
-                    case BehaviorController.VerticalState.Fall:
-                        SetIfDifferent(Prefer("jump", "fly", "stand", "move"));
-                        break;
-
-                    case BehaviorController.VerticalState.Stop:
-                        if (hState == BehaviorController.HorizontalState.MoveL ||
-                            hState == BehaviorController.HorizontalState.MoveR)
-                        {
-                            SetIfDifferent(Prefer(defaultMoveAni, "fly"));
-                            if (e.StateType == BehaviorController.StateType.Horizontal &&
-                                (BehaviorController.HorizontalState)e.PrevState == BehaviorController.HorizontalState.Stop)
-                                PlaySoundEff(bc.ID, "Move");
-                        }
-                        else
-                        {
-                            SetIfDifferent(Prefer("stand", "fly"));
-                        }
-                        break;
-
-                    default:
-                        goto case BehaviorController.VerticalState.Stop;
-                }
-            };
-
-            bc.LayerChanged += (o, e) =>
-            {
-                var prevLayer = e.PrevLayer;
-                var newLayer = e.NewLayer;
-                RequestMoveLayer(bc.Owner, prevLayer, newLayer);
-            };
-
-            ani.AnimationEnd += (o, e) =>
-            {
-                switch (e.CurrentState)
-                {
-                    case "regen":
-                        bc.EndRegen();
-                        break;
-
-                    case "stand":
-                    case "fly":
-                    case "jump":
-                    case "chase":
-                        e.NextState = e.CurrentState;
-                        break;
-
-                    case "move":
-                        e.NextState = e.CurrentState;
-                        PlaySoundEff(bc.ID, "Move");
-                        break;
-
-                    case "hit1":
-                    case "hit":
-                        bc.RecoverHit();
-                        break;
-
-                    case "die1":
-                    case "die":
-                        TrySummonMob(bc);
-                        if (bc.NoRegen)
-                        {
-                            RequestRemoveFromLayer(bc.Owner);
-                            break;
-                        }
-                        bc.RecoverDied();
-                        break;
-
-                    case string s when s.StartsWith("attack") || s.StartsWith("skill"):
-                        bc.EndAttack();
-                        break;
-
-                    default:
-                        goto case "regen";
-                }
-            };
-
-            ani.EffectAnimationEnd += (o, e) =>
-            {
-                switch (e.CurrentState)
-                {
-                    case string s when s.Contains("effect"):
-                        e.NextState = "invisible";
-                        break;
-
-                    default:
-                        break;
-                }
-            };
+            var binding = new MobBehaviorBinding(life, PlaySoundEff, TrySummonMob, RequestMoveLayer, RequestRemoveFromLayer);
+            binding.Bind();
         }
 
         private void AddNpcAI(StateMachineAnimator ani)
@@ -1562,7 +1477,7 @@ namespace WzComparerR2.MapRender
             if (mobNode != null && mob != null)
             {
                 // init controller
-                mob.Controller = new BehaviorController(mob, FootholdManager, movementEnabled: this.EnableMobMovement, summoned: true, playRegenMotion: playRegenMotion);
+                mob.Controller = new BehaviorController(mob, FootholdManager, movementEnabled: this.EnableMobMovement, summoned: true, playRegenMotion: playRegenMotion) { DownJumpEnabled = this.EnableMobDownJump };
                 mob.Controller.InitRandom(this.random);
 
                 LoadSceneItemResource?.Invoke(mob);

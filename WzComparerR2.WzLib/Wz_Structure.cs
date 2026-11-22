@@ -81,7 +81,79 @@ namespace WzComparerR2.WzLib
             calculate_img_count();
         }
 
-        public Wz_File LoadFile(string fileName, Wz_Node node, bool useBaseWz = false, bool loadWzAsFolder = false, string fallbackFileName = null)
+        public Wz_File LoadFile(string fileName, Wz_Node node, bool useBaseWz = false, bool loadWzAsFolder = false, string fallbackFileName = null, Wz_File imageNameOwner = null)
+        {
+            object originalValue = node.Value;
+            var originalChildren = node.Nodes.ToArray();
+            int originalFileCount = this.wz_files.Count;
+            try
+            {
+                return this.LoadFileCore(fileName, node, useBaseWz, loadWzAsFolder, fallbackFileName);
+            }
+            catch (Exception ex) when (!(ex is IOException) || ex is EndOfStreamException || ex is InvalidDataException)
+            {
+                if (ex is OutOfMemoryException || ex is OperationCanceledException || ex is UnauthorizedAccessException)
+                {
+                    throw;
+                }
+                LogWzOpenError(fileName, ex);
+                while (this.wz_files.Count > originalFileCount)
+                {
+                    int index = this.wz_files.Count - 1;
+                    this.wz_files[index].Close();
+                    this.wz_files.RemoveAt(index);
+                }
+                node.Nodes.Clear();
+                foreach (var child in originalChildren)
+                {
+                    node.Nodes.Add(child);
+                }
+                node.Value = originalValue;
+
+                var recovered = new Wz_File(fileName, this, true) { TextEncoding = this.TextEncoding };
+                try
+                {
+                    var images = WzImageScanner.FindAllHits(recovered);
+                    bool folderContainer = loadWzAsFolder && string.Equals(Path.GetFileNameWithoutExtension(fileName),
+                        new DirectoryInfo(Path.GetDirectoryName(Path.GetFullPath(fileName))).Name, StringComparison.OrdinalIgnoreCase);
+                    if (images.Count == 0 && !folderContainer)
+                    {
+                        recovered.Close();
+                        throw;
+                    }
+                    recovered.LoadScannedImages(node, images, imageNameOwner);
+                    this.wz_files.Add(recovered);
+                    recovered.DetectWzType();
+                    return recovered;
+                }
+                catch
+                {
+                    recovered.Close();
+                    throw;
+                }
+            }
+        }
+
+        private static readonly object wzOpenErrorLogLock = new object();
+
+        private static void LogWzOpenError(string fileName, Exception error)
+        {
+            try
+            {
+                string logPath = Path.Combine(AppContext.BaseDirectory, "wz_open_error.log");
+                string message = $"[{DateTimeOffset.Now:O}] {fileName}{Environment.NewLine}{error}{Environment.NewLine}{Environment.NewLine}";
+                lock (wzOpenErrorLogLock)
+                {
+                    File.AppendAllText(logPath, message, Encoding.UTF8);
+                }
+            }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException || ex is System.Security.SecurityException)
+            {
+                System.Diagnostics.Trace.TraceError("Failed to write wz_open_error.log: {0}", ex);
+            }
+        }
+
+        private Wz_File LoadFileCore(string fileName, Wz_Node node, bool useBaseWz, bool loadWzAsFolder, string fallbackFileName)
         {
             Wz_File file = null;
 
@@ -98,33 +170,14 @@ namespace WzComparerR2.WzLib
                 // 1. pre-read and detect version/read rule
                 WzPreReadResult preReadResult = null;
                 IWzFormatProfile matchedProfile = null;
-                Pkg2EntryNamePosition entryNamePosition = Pkg2EntryNamePosition.AfterData;
-                bool use8ByteKey = false;
-                if (!file.UnknownPkg2)
+                foreach (var preReader in WzPreReaders.All)
                 {
-                    foreach (var preReader in WzPreReaders.All)
+                    if (preReader.TryPreRead(file, out var result))
                     {
-                        if (preReader.TryPreRead(file, out var result))
-                        {
-                            matchedProfile = this.TryDetectWzProfile(file, result);
-                            if (matchedProfile != null)
-                            {
-                                preReadResult = result;
-                                break;
-                            }
-                        }
-                    }
-                }
-                if (matchedProfile == null)
-                {
-                    file.UnknownPkg2 = true;
-                    foreach (var preReader in WzPreReaders.All_UNK)
-                    {
-                        if (preReader.TryPreRead(file, out var result))
+                        matchedProfile = this.TryDetectWzProfile(file, result);
+                        if (matchedProfile != null)
                         {
                             preReadResult = result;
-                            entryNamePosition = result.EntryNamePosition;
-                            use8ByteKey = result.use8ByteKey;
                             break;
                         }
                     }
@@ -145,28 +198,6 @@ namespace WzComparerR2.WzLib
                     }
 
                     matchedProfile.AssignDirStringReader(file, this.encryption);
-                }
-
-                // temp workaround for unknown pkg2 encryption
-                // brute-force search for all possible image offsets
-                if (file.Header.IsPkg2 && matchedProfile == null && file.CandidateImageInfos.Count == 0)
-                {
-                    if (preReadResult != null && file.Header is Wz_Header.WzPkg2Header64 pkg2Header)
-                    {
-                        var profile = WzFormatProfiles.GetPkg2UnknownProfile64(entryNamePosition);
-                        file.ReadContext = profile.CreateReadContext(file.Header as Wz_Header.WzPkg2Header64, 0, null, null);
-                        profile.AssignDirStringReader(file, this.encryption);
-                        file.ReadContext.DirStringReader.Use8ByteKey = use8ByteKey;
-                        if (preReadResult.Pkg2DirEntryCounts.Count > 0)
-                        {
-                            file.ForcedCounts = new Queue<int>(preReadResult.Pkg2DirEntryCounts.Select(ec => ec.ActualEntryCount)); 
-                            var imgSearchCount = preReadResult.Pkg2DirEntryCounts.Sum(ec => ec.ActualImgCount);
-                            if (imgSearchCount >= 1)
-                            {
-                                file.FindAllHits(imgSearchCount);
-                            }
-                        }
-                    }
                 }
 
                 // 3. full dir tree read
@@ -287,13 +318,6 @@ namespace WzComparerR2.WzLib
                         return !result.Nodes.Any(n => n.NodeType == 0x02 || n.NodeType == 0x04);
                     }
                 }
-                foreach (var preReader in WzPreReaders.All_UNK)
-                {
-                    if (preReader.TryPreRead(file, out var result))
-                    {
-                        return !result.Nodes.Any(n => n.NodeType == 0x02 || n.NodeType == 0x04);
-                    }
-                }
                 return false;
             }
         }
@@ -358,7 +382,7 @@ namespace WzComparerR2.WzLib
                     string extraFile = extraWzFileName(i);
                     string fallbackExtraFile = fallbackExtraWzFileName(i);
                     var tempNode = new Wz_Node(Path.GetFileName(extraFile));
-                    var extraWzf = this.LoadFile(extraFile, tempNode, false, true, fallbackExtraFile);
+                    var extraWzf = this.LoadFile(extraFile, tempNode, false, true, fallbackExtraFile, entryWzf);
 
                     /*
                      * there is a little hack here, we'll move all img to the entry file, and each img still refers to the original wzfile.
@@ -377,6 +401,26 @@ namespace WzComparerR2.WzLib
                      */
 
                     entryWzf.MergeWzFile(extraWzf);
+                }
+            }
+
+            if (entryWzf.IsImageScanFallback)
+            {
+                string directoryRoot = useBaseWz ? Path.GetDirectoryName(Path.GetFullPath(folder)) : folder;
+                foreach (string subFolder in Directory.GetDirectories(directoryRoot).OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
+                {
+                    string folderName = Path.GetFileName(subFolder);
+                    if (!string.Equals(Path.GetFullPath(subFolder), Path.GetFullPath(folder), StringComparison.OrdinalIgnoreCase)
+                        && node.Nodes[folderName] == null && File.Exists(Path.Combine(subFolder, folderName + ".wz")))
+                    {
+                        Wz_Node child = node.Nodes.Add(folderName);
+                        this.LoadWzFolder(subFolder, ref child, false,
+                            fallbackFolder == null ? null : Path.Combine(useBaseWz ? Path.GetDirectoryName(fallbackFolder) : fallbackFolder, folderName));
+                    }
+                }
+                if (useBaseWz)
+                {
+                    this.has_basewz = true;
                 }
             }
         }

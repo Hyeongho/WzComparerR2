@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Text;
 using System.Linq;
 using WzComparerR2.WzLib;
+using WzComparerR2.MapRender.Particles;
 using WzComparerR2.Common;
 using WzComparerR2.Rendering;
 using WzComparerR2.MapRender.UI;
@@ -1266,7 +1267,21 @@ namespace WzComparerR2.MapRender
                         }
                     }
                 }
-                kvList.Sort((kv1, kv2) => kv1.Value.CompareTo(kv2.Value));
+                kvList.Sort((kv1, kv2) =>
+                {
+                    if (kv1.Value.Z0 == kv2.Value.Z0)
+                    {
+                        if (kv1.Key is ObjItem && kv2.Key is ParticleItem)
+                        {
+                            return -1;
+                        }
+                        if (kv1.Key is ParticleItem && kv2.Key is ObjItem)
+                        {
+                            return 1;
+                        }
+                    }
+                    return kv1.Value.CompareTo(kv2.Value);
+                });
                 foreach (var kv in kvList)
                 {
                     yield return kv;
@@ -1378,39 +1393,38 @@ namespace WzComparerR2.MapRender
                 if (cy == 0) cy = renderSize.Y;
             }
 
-            float GetBackScrollOffset(BackItem back, int rate, int explicitDistance)
+            float GetBackScrollOffset(BackItem back, int rate, int explicitDistance, int tileDistance)
             {
-                int distance = back.W && explicitDistance != 0 ? Math.Abs(explicitDistance) : 100;
-                return (float)(rate * distance * back.View.Time / 20000.0 % distance);
+                int referenceDistance = back.W && explicitDistance != 0 ? Math.Abs(explicitDistance) : 100;
+                double offset = (double)rate * referenceDistance * back.View.Time / 20000.0;
+                if (tileDistance > 0)
+                    offset %= tileDistance;
+                return (float)offset;
             }
 
             Vector2 tileOff = new Vector2(cx, cy);
             Vector2 position = new Vector2(back.X, back.Y);
-            bool hasSpineFlow = back.View.FlowX.HasValue || back.View.FlowY.HasValue;
+            bool hasBackFlow = back.View.FlowX.HasValue || back.View.FlowY.HasValue;
 
             //计算水平卷动
-            if (hasSpineFlow)
+            if (hasBackFlow)
             {
                 int flowX = back.View.FlowX.GetValueOrDefault();
                 int flowY = back.View.FlowY.GetValueOrDefault();
-                int flowRate = flowX != 0 ? flowX : flowY;
-                if (flowRate != 0)
+                if (flowX != 0)
                 {
-                    if (flowX != 0)
-                    {
-                        position.X += GetBackScrollOffset(back, flowRate, back.Wx);
-                    }
-                    if (flowY != 0)
-                    {
-                        position.Y += GetBackScrollOffset(back, flowRate, back.Wy);
-                    }
+                    position.X += GetBackScrollOffset(back, flowX, back.Wx, cx);
+                }
+                if (flowY != 0)
+                {
+                    position.Y += GetBackScrollOffset(back, flowY, back.Wy, cy);
                 }
             }
             else
             {
                 if ((back.TileMode & TileMode.ScrollHorizontal) != 0)
                 {
-                    position.X += GetBackScrollOffset(back, back.Rx, back.Wx);
+                    position.X += GetBackScrollOffset(back, back.Rx, back.Wx, cx);
                 }
                 else //镜头移动比率偏移
                 {
@@ -1420,7 +1434,7 @@ namespace WzComparerR2.MapRender
                 //计算垂直卷动
                 if ((back.TileMode & TileMode.ScrollVertical) != 0)
                 {
-                    position.Y += GetBackScrollOffset(back, back.Ry, back.Wy);
+                    position.Y += GetBackScrollOffset(back, back.Ry, back.Wy, cy);
                 }
                 else //镜头移动比率偏移
                 {
@@ -1479,8 +1493,8 @@ namespace WzComparerR2.MapRender
             var mesh = batcher.MeshPop();
             mesh.RenderObject = renderObj;
             mesh.Position = position;
-            mesh.Z0 = 0;
-            mesh.Z1 = back.Index;
+            mesh.Z0 = back.Index;
+            mesh.Z1 = -1;
             mesh.Alpha = back.Alpha;
             mesh.FlipX = back.Flip;
             mesh.TileRegion = tileRect;
@@ -1620,7 +1634,8 @@ namespace WzComparerR2.MapRender
         private MeshItem GetMeshParticle(ParticleItem particle)
         {
             var pSystem = particle.View?.ParticleSystem;
-            if (pSystem == null)
+            var placement = particle.SubItems[0];
+            if (pSystem == null || placement.StartHidden || placement.Quest.Exists(quest => !patchVisibility.IsQuestVisible(quest.ID, quest.State)))
             {
                 return null;
             }
@@ -1628,11 +1643,17 @@ namespace WzComparerR2.MapRender
             Vector2 position;
             position.X = renderEnv.Camera.Center.X * (100 + particle.Rx) / 100;
             position.Y = renderEnv.Camera.Center.Y * (100 + particle.Ry) / 100;
+            if (pSystem.ModularEffect != null)
+            {
+                position += new Vector2(placement.X, placement.Y);
+            }
 
             var mesh = batcher.MeshPop();
             mesh.RenderObject = pSystem;
             mesh.Position = position;
-            mesh.Z0 = particle.Z;
+            particle.GetRenderZ(out int z, out int order);
+            mesh.Z0 = z;
+            mesh.Z1 = order;
             return mesh;
         }
 

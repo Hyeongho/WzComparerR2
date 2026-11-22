@@ -916,6 +916,38 @@ namespace WzComparerR2
             //this.pictureBoxEx1.PictureName = aniName;
         }
 
+        private void buttonMergeChatBalloonRing_Click(object sender, EventArgs e)
+        {
+            if (this.advTree3.SelectedNode == null)
+            {
+                return;
+            }
+
+            var node = this.advTree3.SelectedNode.AsWzNode();
+            var multiData = this.pictureBoxEx1.LoadMultiFrameAnimation(node);
+            if (multiData == null)
+            {
+                MessageBoxEx.Show("말풍선 반지 멀티프레임을 불러올 수 없습니다.", "말풍선 반지 합치기");
+                return;
+            }
+
+            try
+            {
+                if (!this.pictureBoxEx1.ShowChatBalloonRingOverlay(multiData))
+                {
+                    MessageBoxEx.Show("필수 멀티프레임(nw, n, ne, w, c, e, sw, s, se)이 모두 있어야 합니다.", "말풍선 반지 합치기");
+                    return;
+                }
+                this.cmbItemAniNames.Items.Clear();
+                this.cmbItemSkins.Visible = false;
+                this.pictureBoxEx1.PictureName = "중첩_" + GetSelectedNodeImageName();
+            }
+            finally
+            {
+                this.pictureBoxEx1.DisposeAnimationItem(new MultiFrameAnimator(multiData));
+            }
+        }
+
         private void OverlayMultiFrameWithKey(object sender, EventArgs e)
         {
             if (advTree3.SelectedNode == null)
@@ -1379,8 +1411,6 @@ namespace WzComparerR2
 
             Wz_Structure wz = new Wz_Structure();
             QueryPerformance.Start();
-            ImgNameContainer.Load();
-            DirNameContainer.Dirs.Clear();
             labelItemStatus.Text = $"로드 중: {wzFilePath}";
             advTree1.BeginUpdate();
             try
@@ -1445,6 +1475,10 @@ namespace WzComparerR2
                 WcR2Config.Default.RecentDocuments.Insert(0, wzFilePath);
                 ConfigManager.Save();
                 refreshRecentDocItems();
+                if (wz.wz_files.Any(file => file.IsImageScanFallback))
+                {
+                    this.BeginInvoke(new Action(() => ToastNotification.Show(this, "Wz 파일 형식을 해석할 수 없습니다.", null, 5000, eToastGlowColor.Red, eToastPosition.TopCenter)));
+                }
             }
             catch (FileNotFoundException)
             {
@@ -1685,15 +1719,19 @@ namespace WzComparerR2
             Wz_File questWzFile = baseNode?.FindNodeByPath("Quest")?.GetNodeWzFile() ?? findWzByType(Wz_Type.Quest);
             Wz_File reactorWzFile = baseNode?.FindNodeByPath("Reactor")?.GetNodeWzFile() ?? findWzByType(Wz_Type.Reactor);
 
-            Wz_Node stringNode = updateNode?.FindNodeByPath("String");
-            Wz_Node itemNode = updateNode?.FindNodeByPath("Item");
-            Wz_Node etcNode = updateNode?.FindNodeByPath("Etc");
-            Wz_Node questNode = updateNode?.FindNodeByPath("Quest");
-            Wz_Node reactorNode = updateNode?.FindNodeByPath("Reactor");
+            Wz_Node stringNode = updateNode?.FindNodeByPath("String") ?? updateNode?.FindNodeByPath("String.img", true);
+            Wz_Node itemNode = updateNode?.FindNodeByPath("Item") ?? updateNode?.FindNodeByPath("Item.img", true);
+            Wz_Node etcNode = updateNode?.FindNodeByPath("Etc") ?? updateNode?.FindNodeByPath("Etc.img", true);
+            Wz_Node questNode = updateNode?.FindNodeByPath("Quest") ?? updateNode?.FindNodeByPath("Quest.img", true);
+            Wz_Node reactorNode = updateNode?.FindNodeByPath("Reactor") ?? updateNode?.FindNodeByPath("Reactor.img", true);
 
             if (doStopWatch) QueryPerformance.Start();
             this.stringLinker.Clear();
-            bool r = this.stringLinker.Load(stringWzFile, itemWzFile, etcWzFile, questWzFile, reactorWzFile) && stringLinker.Update(stringNode, itemNode, etcNode, questNode, reactorNode);
+            bool r = this.stringLinker.Load(stringWzFile, itemWzFile, etcWzFile, questWzFile, reactorWzFile);
+            if (updateNode != null)
+            {
+                r = stringLinker.Update(stringNode, itemNode, etcNode, questNode, reactorNode);
+            }
             if (doStopWatch) QueryPerformance.End();
             if (r)
             {
@@ -2456,6 +2494,14 @@ namespace WzComparerR2
                     wzPath.Add("Quest");
                     wzPath.Add("QuestInfo.img");
                     imagePath.Add($"{id}");
+                    addPath();
+                    break;
+
+                case "AchievementData":
+                    wzPath.Add("Etc");
+                    wzPath.Add("Achievement");
+                    wzPath.Add("AchievementData");
+                    wzPath.Add($"{id}.img");
                     addPath();
                     break;
 

@@ -591,11 +591,12 @@ namespace WzComparerR2.CharaSimControl
             int iconY = picH;
             int iconX = 14;
             g.DrawImage(Resource.UIToolTip_img_Item_ItemIcon_base, iconX, picH);
-            if (item.Icon.Bitmap != null)
+            var icon = item.Icon.Bitmap != null ? item.Icon : item.IconRaw;
+            if (icon.Bitmap != null)
             {
-                g.DrawImage(GearGraphics.EnlargeBitmap(item.Icon.Bitmap),
-                iconX + 6 + (1 - item.Icon.Origin.X) * 2,
-                picH + 6 + (33 - item.Icon.Origin.Y) * 2);
+                g.DrawImage(GearGraphics.EnlargeBitmap(icon.Bitmap),
+                iconX + 6 + (1 - icon.Origin.X) * 2,
+                picH + 6 + (33 - icon.Origin.Y) * 2);
             }
             if (item.Cash)
             {
@@ -916,8 +917,12 @@ namespace WzComparerR2.CharaSimControl
 
                 if (item.Sample.Bitmap != null)
                 {
-                    g.DrawImage(item.Sample.Bitmap, (tooltip.Width - item.Sample.Bitmap.Width) / 2, picH);
-                    picH += item.Sample.Bitmap.Height;
+                    int maxSampleWidth = tooltip.Width - 2 * 14;
+                    Bitmap sampleBitmap = item.Sample.Bitmap;
+                    int sampleWidth = Math.Min(sampleBitmap.Width, maxSampleWidth);
+                    int sampleHeight = Math.Max(1, (int)Math.Round((double)sampleBitmap.Height * sampleWidth / sampleBitmap.Width));
+                    g.DrawImage(sampleBitmap, new Rectangle((tooltip.Width - sampleWidth) / 2, picH, sampleWidth, sampleHeight), 0, 0, sampleBitmap.Width, sampleBitmap.Height, GraphicsUnit.Pixel);
+                    picH += sampleHeight;
                     picH += 2;
                 }
                 else if (item.DamageSkinID != null)
